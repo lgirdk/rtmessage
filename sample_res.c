@@ -57,21 +57,13 @@ void onMessage(rtMessageHeader const* hdr, uint8_t const* buff, uint32_t n, void
 
 int main()
 {
-  rtError err;
-
   rtLog_SetLevel(RT_LOG_DEBUG);
 
   rtConnection con;
   rtConnection_Create(&con, "PROVIDER1", "tcp://127.0.0.1:10001");
   rtConnection_AddListener(con, "RDK.MODEL.PROVIDER1", onMessage, con);
 
-  while (1)
-  {
-    err = rtConnection_Dispatch(con);
-    rtLog_Info("dispatch:%s", rtStrError(err));
-    if (err != RT_OK)
-      sleep(1);
-  }
+  pause();
 
   rtConnection_Destroy(con);
   return 0;

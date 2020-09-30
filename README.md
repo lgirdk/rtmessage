@@ -1,4 +1,5 @@
 # rtMessage
+pub/sub style messaging
 
 # Building
 

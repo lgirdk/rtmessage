@@ -28,6 +28,7 @@
 int main()
 {
   rtError err;
+  int i;
 
   rtLog_SetLevel(RT_LOG_DEBUG);
 
@@ -35,7 +36,7 @@ int main()
   rtConnection_Create(&con, "APP1", "tcp://127.0.0.1:10001");
 
 
-  while (1)
+  for(i = 0 ; i < 5; i++) 
   {
     rtMessage res;
     rtMessage req;
@@ -54,10 +55,10 @@ int main()
       rtLog_Info("\tres:%.*s\n", len, p);
 
       free(p);
+      rtMessage_Release(res);
     }
 
     rtMessage_Release(req);
-    rtMessage_Release(res);
 
     sleep(1);
   }

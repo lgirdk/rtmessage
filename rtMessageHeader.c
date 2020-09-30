@@ -24,8 +24,6 @@
 
 #include <string.h>
 
-#define RTMSG_HEADER_VERSION 1
-
 rtError
 rtMessageHeader_Init(rtMessageHeader* hdr)
 {
@@ -46,11 +44,12 @@ rtError
 rtMessageHeader_Encode(rtMessageHeader* hdr, uint8_t* buff)
 {
   uint8_t* ptr = buff;
-  static uint16_t const kSizeWithoutStringsInBytes = 28;
+  static uint16_t const kSizeWithoutStringsInBytes = 32;
   uint16_t length = kSizeWithoutStringsInBytes
     + strlen(hdr->topic)
     + strlen(hdr->reply_topic);
   hdr->header_length = length;
+  rtEncoder_EncodeUInt16(&ptr, RTMSG_HEADER_MARKER);
   rtEncoder_EncodeUInt16(&ptr, RTMSG_HEADER_VERSION);
   rtEncoder_EncodeUInt16(&ptr, hdr->header_length);
   rtEncoder_EncodeInt32(&ptr, hdr->sequence_number); // con->sequence_number++);
@@ -59,6 +58,7 @@ rtMessageHeader_Encode(rtMessageHeader* hdr, uint8_t* buff)
   rtEncoder_EncodeInt32(&ptr, hdr->payload_length);
   rtEncoder_EncodeString(&ptr, hdr->topic, NULL);
   rtEncoder_EncodeString(&ptr, hdr->reply_topic, NULL);
+  rtEncoder_EncodeUInt16(&ptr, RTMSG_HEADER_MARKER);
   return RT_OK;
 }
 
@@ -66,14 +66,42 @@ rtError
 rtMessageHeader_Decode(rtMessageHeader* hdr, uint8_t const* buff)
 {
   uint8_t const* ptr = buff;
+  uint16_t marker = 0;
+  rtEncoder_DecodeUInt16(&ptr, &marker);
+  if(RTMSG_HEADER_MARKER != marker)
+    return RT_ERROR;
   rtEncoder_DecodeUInt16(&ptr, &hdr->version);
   rtEncoder_DecodeUInt16(&ptr, &hdr->header_length);
   rtEncoder_DecodeUInt32(&ptr, &hdr->sequence_number);
   rtEncoder_DecodeUInt32(&ptr, &hdr->flags);
   rtEncoder_DecodeUInt32(&ptr, &hdr->control_data);
   rtEncoder_DecodeUInt32(&ptr, &hdr->payload_length);
-  rtEncoder_DecodeString(&ptr, hdr->topic, &hdr->topic_length);
-  rtEncoder_DecodeString(&ptr, hdr->reply_topic, &hdr->reply_topic_length);
+
+  rtEncoder_DecodeUInt32(&ptr, &hdr->topic_length);
+  if(hdr->topic_length >= sizeof(hdr->topic)) {
+    rtLog_Warn("RTROUTED_INVALID_LENGTH: rtMessageHeader_Decode() - topic_length %d", hdr->topic_length);
+    return RT_ERROR;
+  }
+  if(NULL == ptr) {
+    rtLog_Warn("RTROUTED_INVALID_PTR: rtMessageHeader_Decode() - PTR is NULL");
+    return RT_ERROR;
+  }
+  rtEncoder_DecodeStr(&ptr, hdr->topic, hdr->topic_length);
+
+  rtEncoder_DecodeUInt32(&ptr, &hdr->reply_topic_length);
+  if(hdr->reply_topic_length >= sizeof(hdr->reply_topic)) {
+    rtLog_Warn("RTROUTED_INVALID_LENGTH: rtMessageHeader_Decode() - reply_topic_length %d", hdr->reply_topic_length);
+    return RT_ERROR;
+  }
+  if(NULL == ptr) {
+    rtLog_Warn("RTROUTED_INVALID_PTR: rtMessageHeader_Decode() - PTR is NULL");
+    return RT_ERROR;
+  }
+  rtEncoder_DecodeStr(&ptr, hdr->reply_topic, hdr->reply_topic_length);
+
+  rtEncoder_DecodeUInt16(&ptr, &marker);
+  if(RTMSG_HEADER_MARKER != marker)
+    return RT_ERROR;
   return RT_OK;
 }
 

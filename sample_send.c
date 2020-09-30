@@ -40,6 +40,7 @@ int main()
   {
     rtMessage m;
     rtMessage_Create(&m);
+    rtMessage_SetString(m, "description", "message sent to A.B.C");
     rtMessage_SetInt32(m, "field1", count++);
     rtMessage_SetString(m, "field2", "hello world");
     rtMessage item;
@@ -54,6 +55,7 @@ int main()
     sleep(1);
 
     rtMessage_Create(&m);
+    rtMessage_SetString(m, "description", "message sent to A.B.C.FOO.BAR");
     rtMessage_SetInt32(m, "field1", 1234);
 
     err = rtConnection_SendMessage(con, m, "A.B.C.FOO.BAR");

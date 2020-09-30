@@ -22,6 +22,7 @@
 
 #include <errno.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define RTVECT_BLOCKSIZE 16
 
@@ -119,6 +120,26 @@ rtVector_RemoveItem(rtVector v, void* item, rtVector_Cleanup destroyer)
   return RT_OK;
 }
 
+rtError 
+rtVector_RemoveItemByCompare(rtVector v, const void* comparison, rtVector_Compare compare, rtVector_Cleanup destroyer)
+{
+  size_t i = 0;
+
+  while(i < v->count)
+  {
+    if (compare(v->data[i], comparison) == 0)
+    {
+        rtVector_RemoveItem(v, v->data[i], destroyer);
+        /*no i++ needed because we are at the next one after rtVector_RemoveItem returns*/
+    }
+    else
+    {
+        i++;
+    }
+  }
+  return RT_OK;
+}
+
 void*
 rtVector_At(rtVector v, size_t index)
 {
@@ -132,4 +153,61 @@ rtVector_Size(rtVector v)
 {
   if (!v) return 0;
   return v->count;
+}
+
+int 
+rtVector_HasItem(rtVector v, const void* comparison, rtVector_Compare compare)
+{
+  if(rtVector_Find(v, comparison, compare))
+    return 1;
+  else
+    return 0;
+}
+
+void* 
+rtVector_Find(rtVector v, const void* comparison, rtVector_Compare compare)
+{
+  size_t i;
+  for (i = 0; i < v->count; ++i)
+  {
+    if(compare)
+    {
+      if(compare(v->data[i], comparison) == 0)
+        return v->data[i];
+    }
+    else if (v->data[i] == comparison)
+    {
+      return v->data[i];
+    }
+  }
+  return NULL;
+}
+
+void 
+rtVector_Cleanup_Free(void* item)
+{
+    if(item)
+    {
+        free(item);
+    }
+}
+
+int 
+rtVector_Compare_String(const void* left, const void* right)
+{
+  if(left)
+  {
+    if(right)
+    {
+      return strcmp(left, right);
+    }
+    else
+    {
+      return 1;
+    }
+  }
+  else
+  {
+    return -1;
+  }
 }

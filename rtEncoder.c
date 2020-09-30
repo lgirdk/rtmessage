@@ -58,6 +58,14 @@ rtEncoder_EncodeString(uint8_t** itr, char const* s, uint32_t* n)
 }
 
 rtError
+rtEncoder_DecodeStr(uint8_t const** itr, char* s, uint32_t len)
+{
+  memcpy(s, *itr, len);
+  *itr += len;
+  return RT_OK;
+}
+
+rtError
 rtEncoder_DecodeString(uint8_t const** itr, char* s, uint32_t* n)
 {
   uint32_t len = 0;

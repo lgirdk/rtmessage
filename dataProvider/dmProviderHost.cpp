@@ -26,6 +26,7 @@
 #include <cstring>
 #include <iostream>
 #include <algorithm>
+#include <unistd.h>
 
 #include <rtConnection.h>
 #include <rtError.h>
@@ -100,14 +101,7 @@ private:
 
   void run()
   {
-    while (true)
-    {
-      rtError e = rtConnection_Dispatch(m_con);
-      if (e != RT_OK)
-      {
-        rtLog_Warn("error during dispatch:%s", rtStrError(e));
-      }
-    }
+    pause();
   }
 
   static void requestHandler(rtMessageHeader const* hdr, uint8_t const* buff, uint32_t n,
@@ -153,6 +147,8 @@ private:
       host->decodeSetRequest(req, providerName, params);
       host->doSet(providerName, params, result);
     }
+
+    rtMessage_Release(req);
 
     rtMessage res;
     rtMessage_Create(&res);
@@ -353,7 +349,6 @@ rtConnection dmProviderHostImpl::m_con = nullptr;
 dmProviderHost*
 dmProviderHost::create()
 {
-  rtLog_SetLevel(RT_LOG_DEBUG);
   return new dmProviderHostImpl();
 }
 

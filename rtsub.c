@@ -28,11 +28,9 @@
 
 static int dump_payload = 0;
 
-static void on_message(rtMessageHeader const* hdr, uint8_t const* buff, uint32_t n, void* closure)
+static void on_message(rtMessageHeader const* hdr, rtMessage m, void* closure)
 {
   (void) closure;
-  rtMessage m;
-  rtMessage_FromBytes(&m, buff, n);
 
   printf("BEGIN MESSAGE:%s\n", hdr->topic);
   if (dump_payload)
