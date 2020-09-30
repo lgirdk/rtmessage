@@ -20,20 +20,12 @@
 # This file contains material from pxCore which is Copyright 2005-2018 John Robinson
 # Licensed under the Apache-2.0 license.
 */
-
-// rtLog.h
-
 #ifndef RT_LOG_H_
 #define RT_LOG_H_
 #include <stdint.h>
-#ifdef RT_DEBUG
-#define RT_LOG rtLog
-#else
-#define RT_LOG
-#endif
 
-#ifndef RT_LOGPREFIX
-#define RT_LOGPREFIX "rt:"
+#ifdef ENABLE_RDKLOGGER
+#include "rdk_debug.h"
 #endif
 
 #ifdef __APPLE__
@@ -51,10 +43,6 @@ typedef int32_t rtThreadId;
 extern "C" {
 #endif
 
-#ifdef ENABLE_RDKLOGGER
-#include "rdk_debug.h"
-#endif
-
 typedef enum
 {
   RT_LOG_DEBUG = 0,
@@ -66,23 +54,27 @@ typedef enum
 
 typedef enum
 {
-  rtLog,
-  rdkLog
-}rtLogOption;
+  RT_USE_RTLOGGER,
+  RT_USE_RDKLOGGER
+}rtLoggerSelection;
+
+/*rdkc compatibility fix*/
+#define rdkLog RT_USE_RDKLOGGER
+#define rtLog RT_USE_RTLOGGER
 
 typedef void (*rtLogHandler)(rtLogLevel level, const char* file, int line, int threadId, char* message);
 
 void rtLog_SetLevel(rtLogLevel l);
+rtLogLevel rtLog_GetLevel();
+
 void rtLogSetLogHandler(rtLogHandler logHandler);
+rtLogHandler rtLogGetLogHandler();
+
 const char* rtLogLevelToString(rtLogLevel level);
 rtLogLevel  rtLogLevelFromString(const char* s);
-#ifdef ENABLE_RDKLOGGER
-rdk_LogLevel rdkLogLevelFromrtLogLevel(rtLogLevel level);
-#endif
-void rtLog_SetOption(rtLogOption option);
 
-rtThreadId rtThreadGetCurrentId();
-
+void rtLog_SetOption(rtLoggerSelection option);
+rtLoggerSelection rtLog_GetOption();
 
 #ifdef __GNUC__
 #define RT_PRINTF_FORMAT(IDX, FIRST) __attribute__ ((format (printf, IDX, FIRST)))
@@ -90,15 +82,21 @@ rtThreadId rtThreadGetCurrentId();
 #define RT_PRINTF_FORMAT(IDX, FIRST)
 #endif
 
-// TODO would like this for to be hidden/private... something from Igor broke... 
 void rtLogPrintf(rtLogLevel level, const char* file, int line, const char* format, ...) RT_PRINTF_FORMAT(4, 5);
 
-#define rtLog(LEVEL, FORMAT, ...) do { rtLogPrintf(LEVEL, __FILE__, __LINE__, FORMAT, ## __VA_ARGS__); } while (0)
-#define rtLog_Debug(FORMAT, ...) rtLog(RT_LOG_DEBUG, FORMAT, ## __VA_ARGS__)
-#define rtLog_Info(FORMAT, ...) rtLog(RT_LOG_INFO, FORMAT, ## __VA_ARGS__)
-#define rtLog_Warn(FORMAT, ...) rtLog(RT_LOG_WARN, FORMAT, ## __VA_ARGS__)
-#define rtLog_Error(FORMAT, ...) rtLog(RT_LOG_ERROR, FORMAT, ## __VA_ARGS__)
-#define rtLog_Fatal(FORMAT, ...) rtLog(RT_LOG_FATAL, FORMAT, ## __VA_ARGS__)
+#ifdef ENABLE_RDKLOGGER
+#define rtLog_Debug(FORMAT,...)   do{if(rtLogGetLogHandler() || rtLog_GetOption() == RT_USE_RTLOGGER){rtLogPrintf(RT_LOG_DEBUG,__FILE__,__LINE__,FORMAT, ##__VA_ARGS__);}else{RDK_LOG(RDK_LOG_DEBUG,"LOG.RDK.RTMESSAGE",FORMAT"\n", ##__VA_ARGS__);}}while(0)
+#define rtLog_Info(FORMAT, ...)   do{if(rtLogGetLogHandler() || rtLog_GetOption() == RT_USE_RTLOGGER){rtLogPrintf(RT_LOG_INFO, __FILE__,__LINE__,FORMAT, ##__VA_ARGS__);}else{RDK_LOG(RDK_LOG_INFO, "LOG.RDK.RTMESSAGE",FORMAT"\n", ##__VA_ARGS__);}}while(0)
+#define rtLog_Warn(FORMAT, ...)   do{if(rtLogGetLogHandler() || rtLog_GetOption() == RT_USE_RTLOGGER){rtLogPrintf(RT_LOG_WARN, __FILE__,__LINE__,FORMAT, ##__VA_ARGS__);}else{RDK_LOG(RDK_LOG_WARN, "LOG.RDK.RTMESSAGE",FORMAT"\n", ##__VA_ARGS__);}}while(0)
+#define rtLog_Error(FORMAT, ...)  do{if(rtLogGetLogHandler() || rtLog_GetOption() == RT_USE_RTLOGGER){rtLogPrintf(RT_LOG_ERROR,__FILE__,__LINE__,FORMAT, ##__VA_ARGS__);}else{RDK_LOG(RDK_LOG_ERROR,"LOG.RDK.RTMESSAGE",FORMAT"\n", ##__VA_ARGS__);}}while(0)
+#define rtLog_Fatal(FORMAT, ...)  do{if(rtLogGetLogHandler() || rtLog_GetOption() == RT_USE_RTLOGGER){rtLogPrintf(RT_LOG_FATAL,__FILE__,__LINE__,FORMAT, ##__VA_ARGS__);}else{RDK_LOG(RDK_LOG_FATAL,"LOG.RDK.RTMESSAGE",FORMAT"\n", ##__VA_ARGS__);}}while(0)
+#else
+#define rtLog_Debug(FORMAT...) rtLogPrintf(RT_LOG_DEBUG, __FILE__, __LINE__, FORMAT)
+#define rtLog_Info(FORMAT...)  rtLogPrintf(RT_LOG_INFO,  __FILE__, __LINE__, FORMAT)
+#define rtLog_Warn(FORMAT...)  rtLogPrintf(RT_LOG_WARN,  __FILE__, __LINE__, FORMAT)
+#define rtLog_Error(FORMAT...) rtLogPrintf(RT_LOG_ERROR, __FILE__, __LINE__, FORMAT)
+#define rtLog_Fatal(FORMAT...) rtLogPrintf(RT_LOG_FATAL, __FILE__, __LINE__, FORMAT)
+#endif
 
 #ifdef __cplusplus
 }

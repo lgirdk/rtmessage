@@ -29,7 +29,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
-
+#include <stdlib.h>
 #include <stdio.h>
 
 #define RT_ERROR_CASE(ERR) case ERR: s = # ERR; break;
@@ -50,7 +50,7 @@ typedef struct
 
 static void rtErrorInitThreadSpecificKey()
 {
-  pthread_key_create(&key, NULL);
+  (void) pthread_key_create(&key, free);
 }
 
 rtErrorThreadSpecific* getThreadSpecific()

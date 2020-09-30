@@ -27,50 +27,45 @@
 #include <string.h>
 #include <unistd.h>
 
-void onMessage(rtMessageHeader const* hdr, uint8_t const* buff, uint32_t n, void* closure)
+void onMessage(rtMessageHeader const* hdr, uint8_t const* p, uint32_t n, void* closure)
 {
-  char* s;
-  char* itemstring;
+  rtMessage m;
+  char* str;
   uint32_t num;
 
   (void) closure;
 
-  rtMessage m;
-  rtMessage_FromBytes(&m, buff, n);
+  rtLog_Info("onMessage topic: %s", hdr->topic);
 
-  rtMessage item;
-  rtMessage_Create(&item);
-  rtMessage_GetMessage(m, "new", &item);
-  rtMessage_ToString(item, &itemstring, &num);
-  rtLog_Info("\nSub item: \t%.*s", num, itemstring);
-  rtMessage_ToString(m, &s, &n);
+  rtMessage_FromBytes(&m, p, n);
 
-  rtLog_Info("\tTOPIC: [%d] %s", (int) strlen(hdr->topic), hdr->topic);
-  rtLog_Info("\t[%d] -- %.*s", n, n, s);
+  rtMessage_ToString(m, &str, &num);
+  rtLog_Info("onMessage message: %s", str);
+  free(str);
 
-  free(s);
-  free(itemstring);
+  if(!strcmp(hdr->topic, "A.B.C"))
+  {
+    rtMessage item;
+    rtMessage_GetMessage(m, "new", &item);
+    rtMessage_ToString(item, &str, &num);
+    rtLog_Info("onMessage subitem: %s", str);
+    free(str);
+  }
+
   rtMessage_Release(m);
 }
 
 int main()
 {
-  rtError err;
   rtConnection con;
 
-  rtLog_SetLevel(RT_LOG_INFO);
+  rtLog_SetLevel(RT_LOG_DEBUG);
   rtConnection_Create(&con, "APP2", "tcp://127.0.0.1:10001");
 //  rtConnection_Create(&con, "APP2", "unix:///tmp/rtrouted");
   rtConnection_AddListener(con, "A.*.C", onMessage, NULL);
   rtConnection_AddListener(con, "A.B.C.*", onMessage, NULL);
 
-  while (1)
-  {
-    err = rtConnection_Dispatch(con);
-    rtLog_Info("dispatch:%s", rtStrError(err));
-    if (err != RT_OK)
-      sleep(1);
-  }
+  pause();
 
   rtConnection_Destroy(con);
   return 0;

@@ -50,14 +50,14 @@ namespace
 
   dmDatabase model_db;
   dmDatabase model_roots;
-
+  /*
   bool matches_object(char const* query, char const* obj)
   {
     char const* p = strrchr(query, '.');
     int n = static_cast<int>((intptr_t) p - (intptr_t) query);
     return strncmp(query, obj, n) == 0;
   }
-
+  */
 }
 
 class dmQueryImpl : public dmQuery
@@ -139,7 +139,6 @@ public:
         for (int32_t j = 0; j < paramslen; ++j)
         {
           int status = 0;
-          int index = -1;
           char const* param = nullptr;
           char const* value = nullptr;
           char const* status_msg = nullptr;
@@ -644,7 +643,7 @@ dmProviderDatabase::makeProviderInfo(char const* s)
   if ((p = cJSON_GetObjectItem(json, "provider")) != nullptr)
     providerInfo->setProviderName(p->valuestring);
   if ((p = cJSON_GetObjectItem(json, "is_list")) != nullptr)
-    providerInfo->setIsList(p->type == cJSON_True);
+    providerInfo->setIsList(p->valueint == 1);
 
   // rtLog_Debug("adding object:%s", providerInfo->objectName().c_str());
   if ((p = cJSON_GetObjectItem(json, "properties")) != nullptr)

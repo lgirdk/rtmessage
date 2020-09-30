@@ -66,6 +66,28 @@ rtError
 rtMessage_ToByteArray(rtMessage message, uint8_t** buff, uint32_t* n);
 
 /**
+ * Extract the data from a message as a byte sequence. This takes the additional
+ * argument of suggested_size, which will be used to allocate the memory on the heap.
+ * If this is found to be insufficient, cJSON will realloc internally, but if the application
+ * gets this right, costly realloc() calls can be avoided.
+ * @param extract the data bytes from this message.
+ * @param pointer to the byte sequence location
+ * @param suggested size of buffer to allocate 
+ * @param pointer to number of bytes in the message
+ * @return rtError
+ **/
+rtError
+rtMessage_ToByteArrayWithSize(rtMessage message, uint8_t** buff, uint32_t suggested_size, uint32_t* n);
+
+/**
+ * Free the buffer allocated by rtMessage_ToByteArray or rtMessage_ToByteArrayWithSize
+ * @param pointer to the byte sequence to free
+ * @return rtError
+ **/
+rtError
+rtMessage_FreeByteArray(uint8_t* buff);
+
+/**
  * Add string field to the message
  * @param message to be modified
  * @param name of the field to be added
@@ -85,6 +107,16 @@ rtMessage_SetString(rtMessage message, char const* name, char const* value);
 rtError
 rtMessage_AddString(rtMessage message, char const* name, char const* value);
 
+/**
+ * Add binary data to message
+ * @param message to be modified
+ * @param name of the field to be added
+ * @param ptr pointer to the data buffer (ptr may be freed after this call)
+ * @param size of the buffer
+ * @return rtError
+ **/
+rtError
+rtMessage_AddBinaryData(rtMessage message, char const* name, void const * ptr, const uint32_t size);
 /**
  * Add message field to array in message
  * @param message to be modified
@@ -111,11 +143,10 @@ rtMessage_GetArrayLength(rtMessage const m, char const* name, int32_t* length);
  * @param name of the string item
  * @param index of array
  * @param value obtained
- * @param length of string item
  * @return rtError
  **/
 rtError
-rtMessage_GetStringItem(rtMessage const m, char const* name, int32_t idx, char* value, int len);
+rtMessage_GetStringItem(rtMessage const m, char const* name, int32_t idx, char const** value);
 
 /**
  * Get message item from array in parent message
@@ -133,9 +164,9 @@ rtMessage_GetMessageItem(rtMessage const m, char const* name, int32_t idx, rtMes
  * @param message to be modified
  * @param name of the field to be added
  * @param integer value of the field to be added
- * @return void
+ * @return rtError
  **/
-void
+rtError
 rtMessage_SetInt32(rtMessage message, char const* name, int32_t value);
 
 /**
@@ -143,9 +174,9 @@ rtMessage_SetInt32(rtMessage message, char const* name, int32_t value);
  * @param message to be modified
  * @param name of the field to be added
  * @param double value of the field to be added
- * @return void
+ * @return rtError 
  **/
-void
+rtError
 rtMessage_SetDouble(rtMessage message, char const* name, double value);
 
 /**
@@ -167,6 +198,16 @@ rtMessage_SetMessage(rtMessage message, char const* name, rtMessage item);
  **/
 rtError
 rtMessage_GetString(rtMessage const m, char const* name, char const** value);
+/**
+ * Get binary data from message
+ * @param message to be read from
+ * @param name of the field to get
+ * @param ptr pointer to data buffer (caller must free)
+ * @param size of the data buffer
+ * @return rtError
+ **/
+rtError
+rtMessage_GetBinaryData(rtMessage message, char const* name, void ** ptr, uint32_t *size);
 
 /**
  * Get field value of type string using field name.

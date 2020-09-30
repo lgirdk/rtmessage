@@ -18,15 +18,18 @@
 # limitations under the License.
 ##########################################################################
 */
+#define _GNU_SOURCE 1
 #include "rtError.h"
 #include "rtMessage.h"
+#include "base64.h"
+#include "rtAtomic.h"
 
 #include <cJSON.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
-#include <stdatomic.h>
+#include <pthread.h>
 
 struct _rtMessage
 {
@@ -47,7 +50,7 @@ rtMessage_Create(rtMessage* message)
   {
     (*message)->count = 0;
     (*message)->json = cJSON_CreateObject();
-    __atomic_fetch_add(&(*message)->count, 1, __ATOMIC_SEQ_CST);
+    rt_atomic_fetch_add(&(*message)->count, 1);
     return RT_OK;
   }
   return RT_FAIL;
@@ -67,7 +70,7 @@ rtMessage_Clone(rtMessage const message, rtMessage* copy)
   {
     (*copy)->count = 0;
     (*copy)->json = cJSON_Duplicate(message->json, 1);
-    __atomic_fetch_add(&(*copy)->count, 1, __ATOMIC_SEQ_CST);
+    rt_atomic_fetch_add(&(*copy)->count, 1);
     return RT_OK;
   }
   return RT_FAIL;
@@ -108,7 +111,7 @@ rtMessage_FromBytes(rtMessage* message, uint8_t const* bytes, int n)
     }
 
     (*message)->count = 0;
-    __atomic_fetch_add(&(*message)->count, 1, __ATOMIC_SEQ_CST);
+    rt_atomic_fetch_add(&(*message)->count, 1);
     return RT_OK;
   }
   return RT_FAIL;
@@ -143,6 +146,27 @@ rtError
 rtMessage_ToByteArray(rtMessage message, uint8_t** buff, uint32_t *n)
 {
   return rtMessage_ToString(message, (char **) buff, n);
+}
+
+rtError
+rtMessage_ToByteArrayWithSize(rtMessage message, uint8_t** buff, uint32_t suggested_size, uint32_t* n)
+{
+#ifdef RDKC_BUILD
+  (void)suggested_size;
+  /*cJSON_PrintBuffered is returning NULL on rdkc so we have to use the less efficient method*/
+  return rtMessage_ToString(message, (char **) buff, n);
+#else
+  *buff = (uint8_t *)cJSON_PrintBuffered(message->json, suggested_size, 0);
+  *n = strlen((char *)*buff);
+  return RT_OK;
+#endif
+}
+
+rtError
+rtMessage_FreeByteArray(uint8_t* buff)
+{
+  free(buff);
+  return RT_OK;
 }
 
 /**
@@ -189,10 +213,11 @@ rtMessage_SetString(rtMessage message, char const* name, char const* value)
  * @param integer value of the field to be added
  * @return void
  **/
-void
+rtError
 rtMessage_SetInt32(rtMessage message, char const* name, int32_t value)
 {
-  cJSON_AddNumberToObject(message->json, name, value); 
+  cJSON_AddNumberToObject(message->json, name, value);
+  return RT_OK;
 }
 
 /**
@@ -200,12 +225,13 @@ rtMessage_SetInt32(rtMessage message, char const* name, int32_t value)
  * @param message to be modified
  * @param name of the field to be added
  * @param double value of the field to be added
- * @return void
+ * @return rtError
  **/
-void
+rtError
 rtMessage_SetDouble(rtMessage message, char const* name, double value)
 {
   cJSON_AddItemToObject(message->json, name, cJSON_CreateNumber(value));
+  return RT_OK;
 }
 
 /**
@@ -247,6 +273,31 @@ rtMessage_GetString(rtMessage const  message, const char* name, char const** val
   return RT_FAIL;
 }
 
+/**
+ * Get binary data from message
+ * @param message to get the data from 
+ * @param name of the field to get
+ * @param ptr pointer to binary data (caller should free memory)
+ * @param size of data buffer
+ * @return rtError
+ **/
+rtError
+rtMessage_GetBinaryData(rtMessage message, char const* name, void ** ptr, uint32_t *size)
+{
+  cJSON* p = cJSON_GetObjectItem(message->json, name);
+  if (p)
+  {
+    const unsigned char * value;
+    value = (unsigned char *)p->valuestring;
+	if(RT_OK == base64_decode(value, strlen((const char *)value), ptr, size))
+	{
+      return RT_OK;
+	}
+    else
+      return RT_FAIL;
+  }
+  return RT_FAIL;
+}
 /**
  * Get field value of type string using field name.
  * @param message to get field
@@ -326,11 +377,13 @@ rtMessage_GetMessage(rtMessage const message, char const* name, rtMessage* clone
   cJSON* p = cJSON_GetObjectItem(message->json, name);
   if (p)
   {
-     (*clone)->count = 0;
      (*clone)->json = cJSON_Duplicate(p, cJSON_True);
-     __atomic_fetch_add(&(*clone)->count, 1, __ATOMIC_SEQ_CST);
+     (*clone)->count = 0;
+     rt_atomic_fetch_add(&(*clone)->count, 1);
      return RT_OK;
   }
+  
+  free(clone);
   return RT_FAIL;
 }
 
@@ -392,6 +445,31 @@ rtMessage_AddString(rtMessage m, char const* name, char const* value)
 }
 
 /**
+ * Add binary data to message
+ * @param message to be modified
+ * @param name of the field to be added
+ * @param ptr pointer to binary data to be added
+ * @param size of binary data to be added
+ * @return rtError
+ **/
+rtError
+rtMessage_AddBinaryData(rtMessage message, char const* name, void const * ptr, const uint32_t size)
+{
+  unsigned char * encoded_string = NULL;
+  uint32_t encoded_string_size = 0;
+
+  if(RT_OK == base64_encode((const unsigned char *)ptr, size, &encoded_string, &encoded_string_size))
+  {
+    rtMessage_SetString(message, name, (char *)encoded_string);
+    free(encoded_string);
+    return RT_OK;
+  }
+  else
+  {
+    return RT_FAIL;
+  }
+}
+/**
  * Add message field to array in message
  * @param message to be modified
  * @param name of the field to be added
@@ -446,7 +524,7 @@ rtMessage_GetArrayLength(rtMessage const m, char const* name, int32_t* length)
  * @return rtError
  **/
 rtError
-rtMessage_GetStringItem(rtMessage const m, char const* name, int32_t idx, char* value, int len)
+rtMessage_GetStringItem(rtMessage const m, char const* name, int32_t idx, char const** value)
 {
   cJSON* obj = cJSON_GetObjectItem(m->json, name);
   if (!obj)
@@ -457,9 +535,10 @@ rtMessage_GetStringItem(rtMessage const m, char const* name, int32_t idx, char* 
   cJSON* item = cJSON_GetArrayItem(obj, idx);
   if (item)
   {
-    strncpy(value, item->valuestring, len);
+    *value = item->valuestring;
+    return RT_OK;
   }
-  return RT_OK;
+  return RT_FAIL;
 }
 
 /**
@@ -482,12 +561,12 @@ rtMessage_GetMessageItem(rtMessage const m, char const* name, int32_t idx, rtMes
   *msg = (rtMessage) malloc(sizeof(struct _rtMessage));
   if (msg)
   {
+    (*msg)->json = cJSON_Duplicate(cJSON_GetArrayItem(obj, idx), 1);
     (*msg)->count = 0;
-    (*msg)->json = cJSON_GetArrayItem(obj, idx);
-    __atomic_fetch_add(&(*msg)->count, 1, __ATOMIC_SEQ_CST);
+    rt_atomic_fetch_add(&(*msg)->count, 1);
     return RT_OK;
   }
-  return RT_OK;
+  return RT_FAIL;
 }
 
 /**
@@ -498,7 +577,7 @@ rtMessage_GetMessageItem(rtMessage const m, char const* name, int32_t idx, rtMes
 rtError
 rtMessage_Retain(rtMessage m)
 {
-  __atomic_fetch_add(&m->count, 1, __ATOMIC_SEQ_CST);
+  rt_atomic_fetch_add(&m->count, 1);
   return RT_OK;
 }
 
@@ -511,8 +590,8 @@ rtError
 rtMessage_Release(rtMessage m)
 {
   if (m->count != 0)
-   __atomic_fetch_sub(&m->count, 1, __ATOMIC_SEQ_CST);
+    rt_atomic_fetch_sub(&m->count, 1);
   if (m->count == 0)
     rtMessage_Destroy(m);
-    return RT_OK;
+  return RT_OK;
 }

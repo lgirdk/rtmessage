@@ -34,10 +34,17 @@
 extern "C" {
 #endif
 
+#define RTMSG_HEADER_VERSION 2
+#define RTMSG_HEADER_MARKER 0xAAAA
+#define RTMESSAGEHEADER_PREAMBLE_LENGTH 6
+#define RTMESSAGEHEADER_HDR_LENGTH_OFFSET 4
 typedef enum
 {
   rtMessageFlags_Request = 0x01,
-  rtMessageFlags_Response = 0x02
+  rtMessageFlags_Response = 0x02,
+  rtMessageFlags_Undeliverable = 0x04,
+  rtMessageFlags_Tainted = 0x08,
+  rtMessageFlags_RawBinary = 0x10
 } rtMessageFlags;
 
 typedef struct

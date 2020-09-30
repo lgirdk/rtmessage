@@ -28,12 +28,20 @@ struct _rtVector;
 typedef struct _rtVector* rtVector;
 
 typedef void (*rtVector_Cleanup)(void *);
+typedef int (*rtVector_Compare)(const void *, const void *);
 
 rtError rtVector_Create(rtVector* v);
 rtError rtVector_Destroy(rtVector v, rtVector_Cleanup destroyer);
 rtError rtVector_PushBack(rtVector v, void* item);
 rtError rtVector_RemoveItem(rtVector v, void* item, rtVector_Cleanup destroyer);
+rtError rtVector_RemoveItemByCompare(rtVector v, const void* comparison, rtVector_Compare compare, rtVector_Cleanup destroyer);
 void*   rtVector_At(rtVector v, size_t index);
 size_t  rtVector_Size(rtVector v);
+int     rtVector_HasItem(rtVector v, const void* comparison, rtVector_Compare compare);
+void*   rtVector_Find(rtVector v, const void* comparison, rtVector_Compare compare);
+
+void rtVector_Cleanup_Free(void* item);
+int rtVector_Compare_String(const void* left, const void* right);
 
 #endif
+

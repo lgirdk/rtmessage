@@ -22,12 +22,13 @@
 #include "rtError.h"
 #include "rtLog.h"
 
-#include <ctype.h>
 #include <errno.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
-#include <net/if.h>
 #include <sys/un.h>
+#include <ctype.h>
+#include <net/if.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -123,7 +124,6 @@ rtSocketStorage_ToString(struct sockaddr_storage* ss, char* buff, int n, uint16_
     void* addr = &v4->sin_addr;
     int family = AF_INET;
 
-    addr = &v4->sin_addr;
     if (port)
       *port = ntohs(v4->sin_port);
     family = AF_INET;
@@ -136,8 +136,7 @@ rtSocketStorage_ToString(struct sockaddr_storage* ss, char* buff, int n, uint16_
     struct sockaddr_un* un = (struct sockaddr_un *) ss;
     if (port)
       *port = 0;
-    strcpy(buff, "unix://");
-    strncat(buff, un->sun_path, (n - 7));
+    snprintf(buff, (sizeof(n) - 1), "%s%s", "unix://", un->sun_path);
   }
 
   return RT_OK;
@@ -163,22 +162,20 @@ rtSocket_GetLocalEndpoint(int fd, struct sockaddr_storage* endpoint)
 rtError
 rtSocketStorage_FromString(struct sockaddr_storage* ss, char const* addr)
 {
-  int ret;
-  uint16_t port;
+  int ret = 0;
+  uint16_t port = 0;
   char ip[128];
   rtError err;
   struct sockaddr_in* v4;
   struct sockaddr_in6* v6;
 
-  port = 0;
-  ret = 0;
   memset(ip, 0, sizeof(ip));
 
   if (strncmp(addr, "unix://", 7) == 0)
   {
     struct sockaddr_un* un = (struct sockaddr_un*) ss;
     un->sun_family = AF_UNIX;
-    strcpy(un->sun_path, addr + 7);
+    strncpy(un->sun_path, addr + 7, (sizeof(un->sun_path)-1));
     return RT_OK;
   }
 

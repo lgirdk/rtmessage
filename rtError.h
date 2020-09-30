@@ -19,9 +19,7 @@
 ##########################################################################
 # This file contains material from pxCore which is Copyright 2005-2018 John Robinson
 # Licensed under the Apache-2.0 license.
-
 */
-
 // rtError.h
 
 #ifndef RT_ERROR_H
@@ -64,6 +62,11 @@
 #define RT_ERROR_IN_PROGRESS 1005
 #define RT_ERROR_QUEUE_EMPTY 1006
 #define RT_ERROR_STREAM_CLOSED 1007
+
+#define RT_CHECK(X) if(!(X)){return;}
+#define RT_CHECK_R(X,Y) if(!(X)){return Y;}
+#define RT_CHECK_INVALID_ARG(X) RT_CHECK_R(X,RT_ERROR_INVALID_ARG);
+#define RT_CHECK_NO_MEM(X) RT_CHECK_R(X,rtErrorFromErrno(ENOMEM));
 
 typedef uint32_t rtError;
 

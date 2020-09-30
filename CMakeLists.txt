@@ -27,10 +27,10 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 set(RDKLOGGER_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../../../rdklogger/)
 set(BREAKPAD_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../../../breakpadwrap/)
 
-set(CMAKE_C_FLAGS_DEBUG "-Wall -Wextra -g -O0 -fno-inline") #-Werror
-set(CMAKE_C_FLAGS_RELEASE "-Werror -Wall -Wextra")
-set(CMAKE_CXX_FLAGS_DEBUG "-Wall -Wextra -g -O0 -fno-inline")
-set(CMAKE_CXX_FLAGS_RELEASE "-Wall -Wextra") # -Werror")
+set(CMAKE_C_FLAGS_DEBUG     " -g -O0 -fno-inline ")
+set(CMAKE_C_FLAGS_RELEASE   " ")
+set(CMAKE_CXX_FLAGS_DEBUG   " -g -O0 -fno-inline ")
+set(CMAKE_CXX_FLAGS_RELEASE " ")
 
 if (CMAKE_VERSION VERSION_LESS "3.1")
   message("CMAKE ${CMAKE_CXX_COMPILER_ID}")
@@ -44,15 +44,18 @@ endif ()
 option(BUILD_FOR_DESKTOP "BUILD_FOR_DESKTOP" OFF)
 option(BUILD_RTMESSAGE_LIB "BUILD_RTMESSAGE_LIB" ON)
 option(ENABLE_RTMESSAGE_PROFILE "ENABLE_RTMESSAGE_PROFILE" OFF)
-option(BUILD_RTMESSAGE_SAMPLE_APP "BUILD_RTMESSAGE_SAMPLE_APP" OFF)
+option(BUILD_RTMESSAGE_SAMPLE_APP "BUILD_RTMESSAGE_SAMPLE_APP" ON)
 option(BUILD_RTMESSAGE_ROUTED "BUILD_RTMESSAGE_ROUTED" ON)
 option(BUILD_DATAPROVIDER_LIB "BUILD_DATAPROVIDER_LIB" ON)
 option(BUILD_DMCLI "BUILD_DMCLI" ON)
 option(BUILD_DMCLI_SAMPLE_APP "BUILD_DMCLI_SAMPLE_APP" ON)
 option(ENABLE_RDKLOGGER "ENABLE_RDKLOGGER" OFF)
 option(INCLUDE_BREAKPAD "INCLUDE_BREAKPAD" OFF)
+option(RDKC_BUILD "RDKC_BUILD" ON)
 
-set(CMAKE_C_FLAGS "")
+message("CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}")
+
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra ")
 
 if (BUILD_FOR_DESKTOP)
   message("Building for desktop")
@@ -65,6 +68,7 @@ if (BUILD_FOR_DESKTOP)
     CONFIGURE_COMMAND ""
     BUILD_IN_SOURCE 1
     PREFIX deps
+    CMAKE_ARGS "-DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}"
     BUILD_COMMAND make)
 
   include_directories(
@@ -91,13 +95,15 @@ else()
     link_directories(${BREAKPAD_PATH})
     add_definitions(-DINCLUDE_BREAKPAD)
   endif (INCLUDE_BREAKPAD)
+  if (RDKC_BUILD)
+    add_definitions(-DRDKC_BUILD)
+  endif (RDKC_BUILD)
 endif (BUILD_FOR_DESKTOP)
 
 set(RTMESSAGE_LINK_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR} ${LIBRARY_DIR} ${RDKLOGGER_PATH}/src/.libs/ ${BREAKPAD_PATH})
 
 if (ENABLE_RTMESSAGE_PROFILE)
   message("Enabling rtMessage profile")
-  set(CMAKE_CFLAGS "${CMAKE_C_FLAGS} -pg")
 endif (ENABLE_RTMESSAGE_PROFILE)
 
 if (BUILD_RTMESSAGE_LIB)
@@ -112,7 +118,12 @@ if (BUILD_RTMESSAGE_LIB)
       rtEncoder.c
       rtMessage.c
       rtSocket.c
-      rtVector.c)
+      rtVector.c
+      rtList.c
+      rtRetainable.c
+      base64.c
+      rtRoutingTree.c
+      local_benchmarking.c)
     if (ENABLE_RDKLOGGER)
       add_dependencies(rtMessage cJSON rdklogger)
       target_link_libraries(rtMessage ${LIBRARY_LINKER_OPTIONS} -pthread -lcjson -llog4c -lrdkloggers)
@@ -145,7 +156,6 @@ endif (BUILD_DATAPROVIDER_LIB)
 
 if (BUILD_RTMESSAGE_ROUTED)
     message ("Building rtrouted")
-    set(CMAKE_CFLAGS " ${CMAKE_C_FLAGS}")
     add_executable(rtrouted rtrouted.c)
     if (BUILD_FOR_DESKTOP)
       add_dependencies(rtrouted cJSON)
@@ -190,6 +200,14 @@ if (BUILD_DMCLI_SAMPLE_APP)
 endif (BUILD_DMCLI_SAMPLE_APP)
 
 if (BUILD_RTMESSAGE_SAMPLE_APP)
+    # sample_super
+    add_executable(sample_super sample_super.c)
+    if (BUILD_FOR_DESKTOP)
+      add_dependencies(sample_super cJSON)
+    endif (BUILD_FOR_DESKTOP)
+    add_dependencies(sample_super rtMessage)
+    target_link_libraries(sample_super ${LIBRARY_LINKER_OPTIONS} rtMessage)
+
     # sample_send
     add_executable(sample_send sample_send.c)
     if (BUILD_FOR_DESKTOP)
@@ -229,9 +247,21 @@ if (BUILD_RTMESSAGE_SAMPLE_APP)
     endif (BUILD_FOR_DESKTOP)
     add_dependencies(rtsend rtMessage)
     target_link_libraries(rtsend ${LIBRARY_LINKER_OPTIONS} rtMessage)
+
+    # rtrouted_diag
+    add_executable(rtrouted_diag diag_probe.c)
+    add_dependencies(rtrouted_diag rtMessage)
+    target_link_libraries(rtrouted_diag ${LIBRARY_LINKER_OPTIONS} rtMessage)
 endif (BUILD_RTMESSAGE_SAMPLE_APP)
 
-ADD_CUSTOM_TARGET(distclean COMMAND ${CMAKE_COMMAND} -E remove ${CMAKE_CURRENT_BINARY_DIR}/*.so dmcli sample_provider_* sample_req sample_res sample_send sample_recv rtrouted rtsend CMakeCache.txt)
+ADD_CUSTOM_TARGET(distclean COMMAND ${CMAKE_COMMAND} -E remove ${CMAKE_CURRENT_BINARY_DIR}/*.so dmcli sample_provider_* sample_super sample_req sample_res sample_send sample_recv rtrouted rtsend CMakeCache.txt)
 
 install (TARGETS LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 install (TARGETS ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+
+install (TARGETS rtrouted rtMessage rtrouted_diag RUNTIME DESTINATION bin LIBRARY DESTINATION lib)
+install(FILES rtMessage.h rtMessageHeader.h rtError.h rtConnection.h rtVector.h rtRetainable.h rtLog.h rtList.h rtAtomic.h rtm_discovery_api.h DESTINATION "include/rtmessage")
+
+if (BUILD_FOR_DESKTOP)
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/deps/src/cJSON/libcjson.so ${CMAKE_CURRENT_BINARY_DIR}/deps/src/cJSON/libcjson.so.1 ${CMAKE_CURRENT_BINARY_DIR}/deps/src/cJSON/libcjson.so.1.6.0 DESTINATION lib)
+endif (BUILD_FOR_DESKTOP)
