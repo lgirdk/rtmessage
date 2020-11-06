@@ -1,0 +1,109 @@
+diff --git a/rtMessage.c b/rtMessage.c
+index fdcb989..28d3331 100644
+--- a/rtMessage.c
++++ b/rtMessage.c
+@@ -20,12 +20,12 @@
+ #include <stdlib.h>
+ #include <stdint.h>
+ #include <string.h>
+-#include <stdatomic.h>
++//#include <stdatomic.h>
+ 
+ struct _rtMessage
+ {
+   cJSON* json;
+-  atomic_int count;
++  //atomic_int count;
+ };
+ 
+ /**
+@@ -39,9 +39,9 @@ rtMessage_Create(rtMessage* message)
+   *message = (rtMessage) malloc(sizeof(struct _rtMessage));
+   if (message)
+   {
+-    (*message)->count = 0;
++    //(*message)->count = 0;
+     (*message)->json = cJSON_CreateObject();
+-    __atomic_fetch_add(&(*message)->count, 1, __ATOMIC_SEQ_CST);
++    //__atomic_fetch_add(&(*message)->count, 1, __ATOMIC_SEQ_CST);
+     return RT_OK;
+   }
+   return RT_FAIL;
+@@ -59,9 +59,9 @@ rtMessage_Clone(rtMessage const message, rtMessage* copy)
+   *copy = (rtMessage) malloc(sizeof(struct _rtMessage));
+   if (copy)
+   {
+-    (*copy)->count = 0;
++    //(*copy)->count = 0;
+     (*copy)->json = cJSON_Duplicate(message->json, 1);
+-    __atomic_fetch_add(&(*copy)->count, 1, __ATOMIC_SEQ_CST);
++    //__atomic_fetch_add(&(*copy)->count, 1, __ATOMIC_SEQ_CST);
+     return RT_OK;
+   }
+   return RT_FAIL;
+@@ -101,8 +101,8 @@ rtMessage_FromBytes(rtMessage* message, uint8_t const* bytes, int n)
+       return RT_FAIL;
+     }
+ 
+-    (*message)->count = 0;
+-    __atomic_fetch_add(&(*message)->count, 1, __ATOMIC_SEQ_CST);
++    //(*message)->count = 0;
++    //__atomic_fetch_add(&(*message)->count, 1, __ATOMIC_SEQ_CST);
+     return RT_OK;
+   }
+   return RT_FAIL;
+@@ -116,7 +116,7 @@ rtMessage_FromBytes(rtMessage* message, uint8_t const* bytes, int n)
+ rtError
+ rtMessage_Destroy(rtMessage message)
+ {
+-  if ((message) && ((message)->count == 0))
++  if ((message) /*&& ((message)->count*/ == 0)
+   {
+     if (message->json)
+       cJSON_Delete(message->json);
+@@ -320,9 +320,9 @@ rtMessage_GetMessage(rtMessage const message, char const* name, rtMessage* clone
+   cJSON* p = cJSON_GetObjectItem(message->json, name);
+   if (p)
+   {
+-     (*clone)->count = 0;
++     //(*clone)->count = 0;
+      (*clone)->json = cJSON_Duplicate(p, cJSON_True);
+-     __atomic_fetch_add(&(*clone)->count, 1, __ATOMIC_SEQ_CST);
++     //__atomic_fetch_add(&(*clone)->count, 1, __ATOMIC_SEQ_CST);
+      return RT_OK;
+   }
+   return RT_FAIL;
+@@ -476,9 +476,9 @@ rtMessage_GetMessageItem(rtMessage const m, char const* name, int32_t idx, rtMes
+   *msg = (rtMessage) malloc(sizeof(struct _rtMessage));
+   if (msg)
+   {
+-    (*msg)->count = 0;
++    //(*msg)->count = 0;
+     (*msg)->json = cJSON_GetArrayItem(obj, idx);
+-    __atomic_fetch_add(&(*msg)->count, 1, __ATOMIC_SEQ_CST);
++    //__atomic_fetch_add(&(*msg)->count, 1, __ATOMIC_SEQ_CST);
+     return RT_OK;
+   }
+   return RT_OK;
+@@ -492,7 +492,7 @@ rtMessage_GetMessageItem(rtMessage const m, char const* name, int32_t idx, rtMes
+ rtError
+ rtMessage_Retain(rtMessage m)
+ {
+-  __atomic_fetch_add(&m->count, 1, __ATOMIC_SEQ_CST);
++  //__atomic_fetch_add(&m->count, 1, __ATOMIC_SEQ_CST);
+   return RT_OK;
+ }
+ 
+@@ -504,9 +504,9 @@ rtMessage_Retain(rtMessage m)
+ rtError
+ rtMessage_Release(rtMessage m)
+ {
+-  if (m->count != 0)
+-   __atomic_fetch_sub(&m->count, 1, __ATOMIC_SEQ_CST);
+-  if (m->count == 0)
++  //if (m->count != 0)
++  // __atomic_fetch_sub(&m->count, 1, __ATOMIC_SEQ_CST);
++  //if (m->count == 0)
+     rtMessage_Destroy(m);
+     return RT_OK;
+ }
