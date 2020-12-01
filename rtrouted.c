@@ -475,8 +475,13 @@ rtRouted_OnMessageSubscribe(rtConnectedClient* sender, rtMessageHeader* hdr, uin
   int32_t add_subscrption = 0;
   rtMessage m;
 
-  rtMessage_FromBytes(&m, buff, n);
-      rtMessage_FromBytes(&m, buff, n);
+  if(RT_OK != rtMessage_FromBytes(&m, buff, n))
+  {
+    rtLog_Warn("Bad Subscribe message");
+    rtLog_Warn("Sender %s", sender->ident);
+    return;
+  }
+
   if((RT_OK == rtMessage_GetInt32(m, "add", &add_subscrption)) && 
      (RT_OK == rtMessage_GetString(m, "topic", &expression)) &&
      (RT_OK == rtMessage_GetInt32(m, "route_id", (int32_t *)&route_id)) && 
@@ -535,9 +540,14 @@ static void
 rtRouted_OnMessageHello(rtConnectedClient* sender, rtMessageHeader* hdr, uint8_t const* buff, int n)
 {
   char const* inbox = NULL;
-
   rtMessage m;
-  rtMessage_FromBytes(&m, buff, n);
+
+  if(RT_OK != rtMessage_FromBytes(&m, buff, n))
+  {
+    rtLog_Warn("Bad Hello message");
+    rtLog_Warn("Sender %s", sender->ident);
+    return;
+  }
   rtMessage_GetString(m, "inbox", &inbox);
 
   rtSubscription* subscription = (rtSubscription *) malloc(sizeof(rtSubscription));
@@ -546,7 +556,7 @@ rtRouted_OnMessageHello(rtConnectedClient* sender, rtMessageHeader* hdr, uint8_t
   rtRouted_AddRoute(rtRouted_ForwardMessage, inbox, subscription);
 
   rtMessage_Release(m);
-
+  
   (void)hdr;
 }
 
@@ -598,7 +608,13 @@ rtRouted_OnMessageDiscoverWildcardDestinations(rtConnectedClient* sender, rtMess
   char const* expression = NULL;
   rtMessage m, response = NULL;
 
-  rtMessage_FromBytes(&m, buff, n);
+  if(RT_OK != rtMessage_FromBytes(&m, buff, n))
+  {
+    rtLog_Warn("Bad DiscoverWildcard message");
+    rtLog_Warn("Sender %s", sender->ident);
+    return;
+  }
+
   if((hdr->flags & rtMessageFlags_Request) && (RT_OK == rtMessage_Create(&response)))
   {
     /*Construct the outbound message.*/
@@ -649,7 +665,12 @@ rtRouted_OnMessageDiscoverObjectElements(rtConnectedClient* sender, rtMessageHea
   rtMessage response = NULL;
   char const* expression = NULL;
 
-  rtMessage_FromBytes(&m, buff, n);
+  if(RT_OK != rtMessage_FromBytes(&m, buff, n))
+  {
+    rtLog_Warn("Bad DiscoverObjectElements message");
+    rtLog_Warn("Sender %s", sender->ident);
+    return;
+  }
 
   if((hdr->flags & rtMessageFlags_Request) && (RT_OK == rtMessage_Create(&response)))
   {
@@ -717,7 +738,13 @@ rtRouted_OnMessageDiscoverElementObjects(rtConnectedClient* sender, rtMessageHea
   rtMessage response = NULL;
   char const *expression = NULL;
   int i;
-  rtMessage_FromBytes(&msgIn, buff, n);
+
+  if(RT_OK != rtMessage_FromBytes(&msgIn, buff, n))
+  {
+    rtLog_Warn("Bad DiscoverObjectElements message");
+    rtLog_Warn("Sender %s", sender->ident);
+    return;
+  }
 
   if ((hdr->flags & rtMessageFlags_Request) && (RT_OK == rtMessage_Create(&response)))
   {
