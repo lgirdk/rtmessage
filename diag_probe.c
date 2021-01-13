@@ -25,41 +25,36 @@
 #include <string.h>
 #include <unistd.h>
 
-#define RTROUTER_DIAG_CMD_ENABLE_VERBOSE_LOGS       "enableVerboseLogs"
-#define RTROUTER_DIAG_CMD_DISABLE_VERBOSE_LOGS      "disableVerboseLogs"
-
-#define RTROUTER_DIAG_CMD_LOG_ROUTING_TREE_STATS    "logRoutingTreeStats"
-#define RTROUTER_DIAG_CMD_LOG_ROUTING_TREE_TOPICS   "logRoutingTreeTopics"
-#define RTROUTER_DIAG_CMD_LOG_ROUTING_TREE_ROUTES   "logRoutingTreeRoutes"
-
-#define RTROUTER_DIAG_CMD_ENABLE_TRAFFIC_MONITOR    "enableTrafficMonitor"
-#define RTROUTER_DIAG_CMD_DISABLE_TRAFFIC_MONITOR   "disableTrafficMonitor"
-
-#define RTROUTER_DIAG_CMD_RESET_BENCHMARKING_DATA   "resetBenchmarkData"
-#define RTROUTER_DIAG_CMD_DUMP_BENCHMARKING_DATA    "dumpBenchmarkData"
-
 int main(int argc, char * argv[])
 {
-    printf("%s",
-            "----------\nHelp:\n"
+    printf( "----------\nHelp:\n"
             "Syntax: rtm_diag_probe <command>\n"
             "Following commands are supported:\n"
-            "enableVerboseLogs      - Enable debug level logs in router.\n"
-            "disableVerboseLogs     - Disable debug level logs in router.\n"
-            "logRoutingStats        - Log routing tree stats.\n"
-            "logRoutingTopics       - Log routing tree topics.\n"
-            "logRoutingRoutes       - Log routing tree routes.\n"
-            "enableTrafficMonitor   - Enable bus traffic logging.\n"
-            "disableTrafficMonitor  - Disable bus traffic logging.\n"
-            "dumpBenchmarkData      - Dump raw benchmark data to rtrouted logs.\n"
-            "resetBenchmarkData     - Reset data collected so far for benchmarking.\n"
-            "----------\n"
-
-          );
+            "%-20s - Enable debug level logs in router.\n"
+            "%-20s - Disable debug level logs in router.\n"
+            "%-20s - Log routing tree stats.\n"
+            "%-20s - Log routing tree topics.\n"
+            "%-20s - Log routing tree routes.\n"
+            "%-20s - Enable bus traffic logging.\n"
+            "%-20s - Disable bus traffic logging.\n"
+            "%-20s - Dump raw benchmark data to rtrouted logs.\n"
+            "%-20s - Reset data collected so far for benchmarking.\n"
+            "%-20s - Shutdown the server.\n"
+            "----------\n",
+            RTROUTER_DIAG_CMD_ENABLE_VERBOSE_LOGS,
+            RTROUTER_DIAG_CMD_DISABLE_VERBOSE_LOGS,
+            RTROUTER_DIAG_CMD_LOG_ROUTING_STATS,
+            RTROUTER_DIAG_CMD_LOG_ROUTING_TOPICS,
+            RTROUTER_DIAG_CMD_LOG_ROUTING_ROUTES,
+            RTROUTER_DIAG_CMD_ENABLE_TRAFFIC_MONITOR,
+            RTROUTER_DIAG_CMD_DISABLE_TRAFFIC_MONITOR,
+            RTROUTER_DIAG_CMD_DUMP_BENCHMARKING_DATA,
+            RTROUTER_DIAG_CMD_RESET_BENCHMARKING_DATA,
+            RTROUTER_DIAG_CMD_SHUTDOWN
+  );
   if(1 != argc)
   {
       rtConnection con;
-
       rtLog_SetLevel(RT_LOG_INFO);
       rtConnection_Create(&con, "APP2", "unix:///tmp/rtrouted");
       rtMessage out;
@@ -67,6 +62,8 @@ int main(int argc, char * argv[])
       rtMessage_SetString(out, RTROUTER_DIAG_CMD_KEY, argv[1]);
       rtConnection_SendMessage(con, out, "_RTROUTED.INBOX.DIAG");
       sleep(1);
+      if(strncmp(argv[1], RTROUTER_DIAG_CMD_SHUTDOWN, sizeof(RTROUTER_DIAG_CMD_SHUTDOWN))==0)
+        exit(0);//just exit so rtConnection doesn't try to reconnect to broker
       rtConnection_Destroy(con);
   }
   return 0;

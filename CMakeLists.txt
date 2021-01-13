@@ -52,10 +52,46 @@ option(BUILD_DMCLI_SAMPLE_APP "BUILD_DMCLI_SAMPLE_APP" ON)
 option(ENABLE_RDKLOGGER "ENABLE_RDKLOGGER" OFF)
 option(INCLUDE_BREAKPAD "INCLUDE_BREAKPAD" OFF)
 option(RDKC_BUILD "RDKC_BUILD" ON)
+option(WITH_SPAKE2 "WITH_SPAKE2" OFF)
+
+set(OPENSSL_REQUIRED FALSE)
 
 message("CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}")
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra ")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra")
+
+if (WITH_SPAKE2)
+  message("spake2 enabled")
+  set(OPENSSL_REQUIRED TRUE)
+  add_definitions(-DWITH_SPAKE2=1)
+  if (BUILD_FOR_DESKTOP)
+    add_definitions(-DWITH_SPAKE2_TEST_PIN=1)
+    include_directories(${CMAKE_INSTALL_PREFIX}/include)
+    link_directories(${CMAKE_INSTALL_PREFIX}/lib)
+  endif (BUILD_FOR_DESKTOP)
+endif (WITH_SPAKE2)
+
+if (OPENSSL_REQUIRED)
+  message("openssl enabled")
+  if( OPENSSL_ROOT_DIR )
+    if( OPENSSL_VERSION )
+        find_package(OpenSSL "${OPENSSL_VERSION}" EXACT REQUIRED PATH "${OPENSSL_ROOT_DIR}")
+    else()
+        find_package(OpenSSL REQUIRED PATH "${OPENSSL_ROOT_DIR}")
+    endif()
+  else()
+    if( OPENSSL_VERSION )
+        find_package(OpenSSL "${OPENSSL_VERSION}" EXACT REQUIRED )
+    else()
+        find_package(OpenSSL REQUIRED )
+    endif()
+    include_directories("${OPENSSL_INCLUDE_DIR}")
+  endif()
+  include_directories("${OPENSSL_INCLUDE_DIR}")
+  #message("OPENSSL_INCLUDE_DIR=${OPENSSL_INCLUDE_DIR}")
+  #message("OPENSSL_CRYPTO_LIBRARY=${OPENSSL_CRYPTO_LIBRARY}")
+  #message("OPENSSL_SSL_LIBRARY=${OPENSSL_SSL_LIBRARY}")
+endif (OPENSSL_REQUIRED)
 
 if (BUILD_FOR_DESKTOP)
   message("Building for desktop")
@@ -80,7 +116,7 @@ if (BUILD_FOR_DESKTOP)
     ${CMAKE_BINARY_DIR}
     ${LIBRARY_DIR})
 else()
-  set(INCLUDE_DIR ${CMAKE_INSTALL_PREFIX}/include )
+  set(INCLUDE_DIR ${CMAKE_INSTALL_PREFIX}/include)
   set(LIBRARY_DIR ${CMAKE_INSTALL_PREFIX}/lib)
   if (ENABLE_RDKLOGGER)
     include_directories(${CMAKE_CURRENT_SOURCE_DIR} ${INCLUDE_DIR} ${INCLUDE_DIR}/cjson ${RDKLOGGER_PATH} ${RDKLOGGER_PATH}/include)
@@ -108,10 +144,12 @@ endif (ENABLE_RTMESSAGE_PROFILE)
 
 if (BUILD_RTMESSAGE_LIB)
     message("Building rtMessage lib")
+
     add_library(
       rtMessage
       SHARED
       rtConnection.c
+      rtCipher.c
       rtLog.c
       rtError.c
       rtMessageHeader.c
@@ -121,8 +159,9 @@ if (BUILD_RTMESSAGE_LIB)
       rtVector.c
       rtList.c
       rtRetainable.c
-      base64.c
+      rtBase64.c
       local_benchmarking.c)
+
     if (ENABLE_RDKLOGGER)
       add_dependencies(rtMessage cJSON rdklogger)
       target_link_libraries(rtMessage ${LIBRARY_LINKER_OPTIONS} -pthread -lcjson -llog4c -lrdkloggers)
@@ -130,6 +169,15 @@ if (BUILD_RTMESSAGE_LIB)
       add_dependencies(rtMessage cJSON)
       target_link_libraries(rtMessage ${LIBRARY_LINKER_OPTIONS} -pthread -lcjson)
     endif (ENABLE_RDKLOGGER)
+
+    if (OPENSSL_REQUIRED)
+      target_link_libraries(rtMessage ${OPENSSL_SSL_LIBRARY} ${OPENSSL_CRYPTO_LIBRARY})
+    endif (OPENSSL_REQUIRED)
+
+    if (WITH_SPAKE2)
+      target_link_libraries(rtMessage -lspake2plus -lpwd)
+    endif (WITH_SPAKE2)
+
 endif (BUILD_RTMESSAGE_LIB)
 
 if (BUILD_DATAPROVIDER_LIB)
@@ -258,8 +306,8 @@ ADD_CUSTOM_TARGET(distclean COMMAND ${CMAKE_COMMAND} -E remove ${CMAKE_CURRENT_B
 install (TARGETS LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 install (TARGETS ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
 
-install (TARGETS rtrouted rtMessage rtrouted_diag RUNTIME DESTINATION bin LIBRARY DESTINATION lib)
-install(FILES rtMessage.h rtMessageHeader.h rtError.h rtConnection.h rtVector.h rtRetainable.h rtLog.h rtList.h rtAtomic.h rtm_discovery_api.h DESTINATION "include/rtmessage")
+install (TARGETS rtrouted rtMessage rtrouted_diag sample_super RUNTIME DESTINATION bin LIBRARY DESTINATION lib)
+install (FILES rtMessage.h rtMessageHeader.h rtError.h rtConnection.h rtVector.h rtRetainable.h rtLog.h rtList.h rtAtomic.h rtm_discovery_api.h DESTINATION "include/rtmessage")
 
 if (BUILD_FOR_DESKTOP)
     install(FILES ${CMAKE_CURRENT_BINARY_DIR}/deps/src/cJSON/libcjson.so ${CMAKE_CURRENT_BINARY_DIR}/deps/src/cJSON/libcjson.so.1 ${CMAKE_CURRENT_BINARY_DIR}/deps/src/cJSON/libcjson.so.1.6.0 DESTINATION lib)

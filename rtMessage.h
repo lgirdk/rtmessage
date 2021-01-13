@@ -22,6 +22,7 @@
 #define __RT_MESSAGING_H__
 
 #include "rtError.h"
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -277,6 +278,12 @@ rtMessage_GetSendTopic(rtMessage const m, char* topic);
  **/
 rtError
 rtMessage_SetSendTopic(rtMessage m, char const* topic);
+
+rtError
+rtMessage_SetBool(rtMessage const m, char const* name, bool b);
+
+rtError
+rtMessage_GetBool(rtMessage const m, char const* name, bool* b);
 
 /**
  * Increase reference count of message by 1

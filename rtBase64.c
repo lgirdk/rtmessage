@@ -21,7 +21,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include "rtLog.h"
-#include "base64.h"
+#include "rtBase64.h"
 
 static const char base64_lookup_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -49,23 +49,22 @@ static unsigned char decode_base64_char(unsigned char in, bool * error)
         return 63;
     else
     {
-        rtLog_Error("Illegal base64 character %x. Cannot decode.\n", in);
+        rtLog_Error("Illegal base64 character %x. Cannot decode.", in);
         *error = true; 
         return 0;
     }
 }
 
-rtError base64_encode(const void * in, const unsigned int in_size, unsigned char ** out, unsigned int *out_size)
+rtError rtBase64_encode(const void * in, const unsigned int in_size, unsigned char ** out, unsigned int *out_size)
 {
     unsigned char * read_buff = (unsigned char * )in;
     if(RBUS_BINARY_DATA_SIZE_LIMIT < in_size)
     {
-        rtLog_Error("Cannot encode more than %d bytes as binary data. Request for %d bytes is denied.\n", RBUS_BINARY_DATA_SIZE_LIMIT, in_size);
+        rtLog_Error("Cannot encode more than %d bytes as binary data. Request for %d bytes is denied.", RBUS_BINARY_DATA_SIZE_LIMIT, in_size);
         return RT_ERROR;
     }
 
     unsigned int last_group_len = in_size % 3;
-    rtLog_Debug("Size of input: %d octets, size of last group is %d\n", in_size, last_group_len);
 
     /*Allocate memory for the output*/
     *out_size = in_size * 4 / 3 + 1 /*Extra byte for string terminator.*/;
@@ -73,11 +72,9 @@ rtError base64_encode(const void * in, const unsigned int in_size, unsigned char
         *out_size += 4;
 
     unsigned char *write_buff = (unsigned char *) malloc(*out_size);
-    if(NULL != write_buff)
-        rtLog_Debug("Allocated %d bytes of memory for output.\n", *out_size);
-    else
+    if(NULL == write_buff)
     {
-        rtLog_Error("Couldn't allocate memory for output.\n");
+        rtLog_Error("Couldn't allocate memory for output.");
         return RT_FAIL;
     }
 
@@ -121,26 +118,24 @@ rtError base64_encode(const void * in, const unsigned int in_size, unsigned char
             break;
 
         default:
-            rtLog_Error("Unexpected condition.\n");
+            rtLog_Error("Unexpected condition.");
     }
     write_buff[write_index] = '\0';
-    rtLog_Debug("Encoded string is <<%s>>\nLast value of write index: %d\n", write_buff, write_index);
     *out = write_buff;
     return RT_OK;
 }
 
-rtError base64_decode(const unsigned char * in, const unsigned int in_size,  void ** out, unsigned int *out_size)
+rtError rtBase64_decode(const unsigned char * in, const unsigned int in_size,  void ** out, unsigned int *out_size)
 {
     if(RBUS_BASE64_DATA_SIZE_LIMIT < in_size)
     {
-        rtLog_Error("Cannot decode more than %d bytes. Request for %d bytes is denied.\n", RBUS_BASE64_DATA_SIZE_LIMIT, in_size);
+        rtLog_Error("Cannot decode more than %d bytes. Request for %d bytes is denied.", RBUS_BASE64_DATA_SIZE_LIMIT, in_size);
         return RT_ERROR;
     }
     int num_padding_bytes = 0;
-    rtLog_Debug("Decoded string is <<%s>>\n", in);
     if(0 != (in_size % 4))
     {
-        rtLog_Error("Illegal base64 encoding. Length is %d. It has to be a multiple of 4.\n", in_size);
+        rtLog_Error("Illegal base64 encoding. Length is %d. It has to be a multiple of 4.", in_size);
         return RT_ERROR;
     }
 
@@ -159,11 +154,9 @@ rtError base64_decode(const unsigned char * in, const unsigned int in_size,  voi
     *out_size -= num_padding_bytes;
 
     unsigned char *write_buff = (unsigned char *) malloc(*out_size);
-    if(NULL != write_buff)
-        rtLog_Debug("Allocated %d bytes of memory for output.\n", *out_size);
-    else
+    if(NULL == write_buff)
     {
-        rtLog_Fatal("Couldn't allocate memory for output.\n");
+        rtLog_Fatal("Couldn't allocate memory for output.");
         return RT_FAIL;
     }
 
@@ -173,7 +166,6 @@ rtError base64_decode(const unsigned char * in, const unsigned int in_size,  voi
     unsigned int write_index  = 0;
     unsigned int temp_size = in_size - (0 == num_padding_bytes ? 0 : 4);
     bool decode_error = false;
-    rtLog_Debug("Decoding the first %d characters.\n", temp_size);
     while(read_index < temp_size)
     {
         write_buff[write_index++] = (decode_base64_char(in[read_index], &decode_error) << 2) | (decode_base64_char(in[read_index + 1], &decode_error) >> 4);
@@ -194,7 +186,7 @@ rtError base64_decode(const unsigned char * in, const unsigned int in_size,  voi
 
     if(true == decode_error)
     {
-        rtLog_Error("Decode error.\n");
+        rtLog_Error("Decode error.");
         free(write_buff);
         *out = NULL;
         out_size = 0;

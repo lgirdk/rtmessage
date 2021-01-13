@@ -34,4 +34,6 @@
 #define RTROUTER_DIAG_CMD_RESET_BENCHMARKING_DATA   "resetBenchmarkData"
 #define RTROUTER_DIAG_CMD_DUMP_BENCHMARKING_DATA    "dumpBenchmarkData"
 
+#define RTROUTER_DIAG_CMD_SHUTDOWN                  "shutdown"
+
 #endif

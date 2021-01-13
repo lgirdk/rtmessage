@@ -20,6 +20,7 @@
 */
 #include "rtMessage.h"
 #include "rtConnection.h"
+#include "rtCipher.h"
 #include "rtEncoder.h"
 #include "rtError.h"
 #include "rtLog.h"
@@ -99,6 +100,11 @@ struct _rtConnection
   pthread_t               callback_thread;
   pthread_mutex_t         callback_message_mutex;
   pthread_cond_t          callback_message_cond;
+#ifdef WITH_SPAKE2
+  rtCipher*               cipher;
+  uint8_t*                encryption_buffer;
+  uint8_t*                decryption_buffer;
+#endif
 };
 
 typedef struct _rtMessageInfo
@@ -131,7 +137,16 @@ static int rtConnection_StartThreads(rtConnection con);
 static int rtConnection_StopThreads(rtConnection con);
 static rtError rtConnection_Read(rtConnection con, int32_t timeout);
 
-void rtMessageInfo_Init(rtMessageInfo** pim)
+static inline bool rtConnection_IsSecure(rtConnection con)
+{
+#ifdef WITH_SPAKE2
+  return (con->cipher != NULL);
+#else
+  return false;
+#endif
+}
+
+static void rtMessageInfo_Init(rtMessageInfo** pim)
 {
     (*pim) = malloc(sizeof(struct _rtMessageInfo));
     (*pim)->retainable.refCount = 0;
@@ -143,7 +158,7 @@ void rtMessageInfo_Init(rtMessageInfo** pim)
     rtRetainable_retain(*pim);
 }
 
-void rtMessageInfo_Destroy(rtRetainable* r)
+static void rtMessageInfo_Destroy(rtRetainable* r)
 {
   rtMessageInfo* mi = (rtMessageInfo*)r;
 
@@ -153,24 +168,25 @@ void rtMessageInfo_Destroy(rtRetainable* r)
   free(mi);
 }
 
-void rtMessageInfo_Retain(rtMessageInfo* mi)
-{
-  rtRetainable_retain(mi);
-}
-
-void rtMessageInfo_Release(rtMessageInfo* mi)
+static void rtMessageInfo_Release(rtMessageInfo* mi)
 {
   rtRetainable_release(mi, rtMessageInfo_Destroy);
 }
 
-void rtMessageInfo_ListItemFree(void* p)
+static void rtMessageInfo_ListItemFree(void* p)
 {
     rtMessageInfo_Release((rtMessageInfo*)p);
+}
+
+static inline bool rtMessageInfo_IsEncrypted(rtMessageInfo* msginfo)
+{
+  return msginfo->header.flags & rtMessageFlags_Encrypted;
 }
 
 static void onDefaultMessage(rtMessageHeader const* hdr, uint8_t const* buff, uint32_t n, void* closure)
 {
   struct _rtConnection* con = (struct _rtConnection *) closure;
+
   if(con->default_callback)
   {
     con->default_callback(hdr, buff, n, con->default_closure);
@@ -357,8 +373,9 @@ rtConnection_ReadUntil(rtConnection con, uint8_t* buff, int count, int32_t timeo
   return RT_OK;
 }
 
-rtError
-rtConnection_Create(rtConnection* con, char const* application_name, char const* router_config)
+
+static rtError
+rtConnection_CreateInternal(rtConnection* con, char const* application_name, char const* router_config)
 {
   int i = 0;
   rtError err = RT_OK;
@@ -403,6 +420,11 @@ rtConnection_Create(rtConnection* con, char const* application_name, char const*
   rtList_Create(&c->callback_message_list);
   c->default_callback = NULL;
   c->run_threads = 0;
+#ifdef WITH_SPAKE2
+  c->cipher = NULL;
+  c->encryption_buffer = NULL;
+  c->decryption_buffer = NULL;
+#endif
   memset(c->inbox_name, 0, RTMSG_HEADER_MAX_TOPIC_LENGTH);
   memset(&c->local_endpoint, 0, sizeof(struct sockaddr_storage));
   memset(&c->remote_endpoint, 0, sizeof(struct sockaddr_storage));
@@ -419,30 +441,33 @@ rtConnection_Create(rtConnection* con, char const* application_name, char const*
   err = rtConnection_ConnectAndRegister(c);
   if (err != RT_OK)
   {
+    // TODO: at least log this
+    rtLog_Warn("rtConnection_ConnectAndRegister(1):%d", err);
   }
+
   if (err == RT_OK)
   {
     rtConnection_AddListener(c, c->inbox_name, onDefaultMessage, c);
+    rtConnection_StartThreads(c);
     *con = c;
   }
-  rtConnection_StartThreads(c);
+
   return err;
+}
+
+rtError
+rtConnection_Create(rtConnection* con, char const* application_name, char const* router_config)
+{
+  return rtConnection_CreateInternal(con, application_name, router_config);
 }
 
 rtError
 rtConnection_CreateWithConfig(rtConnection* con, rtMessage const conf)
 {
-  int i;
-  rtError err;
-  char const* application_name;
-  char const* router_config;
-  int start_router;
-
-  i = 0;
-  err = RT_OK;
-  application_name = NULL;
-  router_config = NULL;
-  start_router = 0;
+  rtError err = RT_OK;
+  char const* application_name = NULL;
+  char const* router_config = NULL;
+  int start_router = 0;
 
   rtMessage_GetString(conf, "appname", &application_name);
   rtMessage_GetString(conf, "uri", &router_config);
@@ -455,49 +480,43 @@ rtConnection_CreateWithConfig(rtConnection* con, rtMessage const conf)
       return err;
   }
 
-  rtConnection c = (rtConnection) malloc(sizeof(struct _rtConnection));
-  if (!c)
-    return rtErrorFromErrno(ENOMEM);
+  err = rtConnection_CreateInternal(con, application_name, router_config);
 
-  for (i = 0; i < RTMSG_LISTENERS_MAX; ++i)
+#ifdef WITH_SPAKE2
+  if(err == RT_OK)
   {
-    c->listeners[i].in_use = 0;
-    c->listeners[i].closure = NULL;
-    c->listeners[i].callback = NULL;
-    c->listeners[i].subscription_id = 0;
-  }
+    char const* spake2_psk = NULL;
 
-//  c->response = NULL;
-  c->send_buffer = (uint8_t *) malloc(RTMSG_SEND_BUFFER_SIZE);
-  c->recv_buffer = (uint8_t *) malloc(RTMSG_SEND_BUFFER_SIZE);
-  c->sequence_number = 1;
-  c->application_name = strdup(application_name);
-  c->fd = -1;
-  memset(c->inbox_name, 0, RTMSG_HEADER_MAX_TOPIC_LENGTH);
-  memset(&c->local_endpoint, 0, sizeof(struct sockaddr_storage));
-  memset(&c->remote_endpoint, 0, sizeof(struct sockaddr_storage));
-  memset(c->send_buffer, 0, RTMSG_SEND_BUFFER_SIZE);
-  memset(c->recv_buffer, 0, RTMSG_SEND_BUFFER_SIZE);
-  snprintf(c->inbox_name, RTMSG_HEADER_MAX_TOPIC_LENGTH, "%s.INBOX.%d", c->application_name, (int) getpid());
+    rtMessage_GetString(conf, "spake2_psk", &spake2_psk);
 
-  err = rtSocketStorage_FromString(&c->remote_endpoint, router_config);
-  if (err != RT_OK)
-  {
-    rtLog_Warn("failed to parse:%s. %s", router_config, rtStrError(err));
-    free(c);
-    return err;
-  }
+    if(spake2_psk)
+    {
+      rtLog_Info("enabling secure messaging");
 
-  err = rtConnection_ConnectAndRegister(c);
-  if (err != RT_OK)
-  {
-  }
+      err = rtCipher_CreateCipherSpake2Plus(&(*con)->cipher, conf);
+      if(err != RT_OK)
+      {
+        rtLog_Error("failed to initialize spake2 based cipher");
+        rtConnection_Destroy(*con);
+        return err;
+      }
 
-  if (err == RT_OK)
-  {
-    rtConnection_AddListener(c, c->inbox_name, onDefaultMessage, c);
-    *con = c;
+      err = rtCipher_RunKeyExchangeClient((*con)->cipher, *con);
+      if (err != RT_OK)
+      {
+        rtLog_Error("failed to do key exchange");
+        rtConnection_Destroy(*con);
+        return err;
+      }
+
+      (*con)->encryption_buffer = malloc(RTMSG_SEND_BUFFER_SIZE);
+      memset((*con)->encryption_buffer, 0, RTMSG_SEND_BUFFER_SIZE);
+      (*con)->decryption_buffer = malloc(RTMSG_SEND_BUFFER_SIZE);
+      memset((*con)->decryption_buffer, 0, RTMSG_SEND_BUFFER_SIZE);
+
+    }
   }
+#endif
 
   return err;
 }
@@ -525,7 +544,14 @@ rtConnection_Destroy(rtConnection con)
       free(con->recv_buffer);
     if (con->application_name)
       free(con->application_name);
-
+#ifdef WITH_SPAKE2
+    if (con->cipher)
+      rtCipher_Destroy(con->cipher);
+    if (con->encryption_buffer)
+      free(con->encryption_buffer);
+    if (con->decryption_buffer)
+      free(con->decryption_buffer);
+#endif
     for (i = 0; i < RTMSG_LISTENERS_MAX; ++i)
     {
       if (con->listeners[i].in_use)
@@ -619,6 +645,7 @@ rtConnection_SendResponse(rtConnection con, rtMessageHeader const* request_hdr, 
   rtError err;
   uint8_t* p;
   uint32_t n;
+
   rtMessage_ToByteArrayWithSize(res, &p, DEFAULT_SEND_BUFFER_SIZE, &n);
   err = rtConnection_SendInternal(con, p, n, request_hdr->reply_topic, request_hdr->topic, rtMessageFlags_Response, request_hdr->sequence_number);
   rtMessage_FreeByteArray(p);
@@ -632,16 +659,20 @@ rtConnection_SendBinary(rtConnection con, uint8_t const* p, uint32_t n, char con
 }
 
 rtError
-rtConnection_SendBinaryDirect(rtConnection con, uint8_t const* p, uint32_t n, char const* topic, char const* listener)
+rtConnection_SendBinaryDirect(rtConnection con, uint8_t const* p, uint32_t n, char const* topic,
+  char const* listener)
 {
   rtError err;
   uint32_t sequence_number;
-  pthread_mutex_lock(&con->mutex);
+
 #ifdef C11_ATOMICS_SUPPORTED
   sequence_number = atomic_fetch_add_explicit(&con->sequence_number, 1, memory_order_relaxed);
 #else
   sequence_number = __sync_fetch_and_add(&con->sequence_number, 1);
 #endif
+
+
+  pthread_mutex_lock(&con->mutex);
   err = rtConnection_SendInternal(con, p, n, topic, listener, rtMessageFlags_RawBinary, sequence_number);
   pthread_mutex_unlock(&con->mutex);
   return err;
@@ -682,8 +713,9 @@ rtConnection_SendBinaryResponse(rtConnection con, rtMessageHeader const* request
   int32_t timeout)
 {
   (void) timeout;
+
   return rtConnection_SendInternal(con, p, n, request_hdr->reply_topic, request_hdr->topic, 
-    rtMessageFlags_Response | rtMessageFlags_RawBinary, request_hdr->sequence_number);
+    rtMessageFlags_Response|rtMessageFlags_RawBinary, request_hdr->sequence_number);
 }
 
 rtError
@@ -833,12 +865,36 @@ rtConnection_SendInternal(rtConnection con, uint8_t const* buff, uint32_t n, cha
   int max_attempts;
   ssize_t bytes_sent;
   rtMessageHeader header;
+  uint8_t const* message;
+  uint32_t message_length;
+
+#ifdef WITH_SPAKE2
+  /*encrypte all non-internal messages*/
+  if (rtConnection_IsSecure(con) && topic[0] != '_')
+  { 
+    rtLog_Debug("encryping message");
+
+    if ((err = rtCipher_Encrypt(con->cipher, buff, n, con->encryption_buffer, RTMSG_SEND_BUFFER_SIZE, &message_length)) != RT_OK)
+    {
+      rtLog_Error("failed to encrypt payload, not sending message. %s", rtStrError(err));
+      return err;
+    }
+
+    message = (uint8_t *)con->encryption_buffer;
+    flags |= rtMessageFlags_Encrypted;
+  }
+  else
+#endif
+  {
+    message = (uint8_t *) buff;
+    message_length = n;
+  }
 
   max_attempts = 2;
   num_attempts = 0;
 
   rtMessageHeader_Init(&header);
-  header.payload_length = n;
+  header.payload_length = message_length;
 
   strncpy(header.topic, topic, RTMSG_HEADER_MAX_TOPIC_LENGTH-1);
   header.topic_length = strlen(header.topic);
@@ -869,8 +925,9 @@ rtConnection_SendInternal(rtConnection con, uint8_t const* buff, uint32_t n, cha
     return err;
   }
 
-  struct iovec send_vec[] = {{con->send_buffer, header.header_length}, {(void *)buff, header.payload_length}};
+  struct iovec send_vec[] = {{con->send_buffer, header.header_length}, {(void *)message, header.payload_length}};
   struct msghdr send_hdr = {NULL, 0, send_vec, 2, NULL, 0, 0};
+
   do
   {
     bytes_sent = sendmsg(con->fd, &send_hdr, MSG_NOSIGNAL);
@@ -893,6 +950,7 @@ rtConnection_SendInternal(rtConnection con, uint8_t const* buff, uint32_t n, cha
   }
   while ((err != RT_OK) && (num_attempts++ < max_attempts));
   con->send_buffer_in_use=0;
+
   return err;
 }
 
@@ -1116,6 +1174,9 @@ rtConnection_Read(rtConnection con, int32_t timeout)
       err = rtMessageHeader_Decode(&msginfo->header, con->recv_buffer);
     }
 
+    // TODO: need to check for secure message here and decrypt
+    // the msginfo->data and capacity might need to adjusted
+
     if (err == RT_OK)
     {
       if(msginfo->dataCapacity < msginfo->header.payload_length + 1)
@@ -1130,6 +1191,33 @@ rtConnection_Read(rtConnection con, int32_t timeout)
       {
         msginfo->data[msginfo->header.payload_length] = '\0';
         msginfo->dataLength = msginfo->header.payload_length;
+
+#ifdef WITH_SPAKE2
+        if (rtMessageInfo_IsEncrypted(msginfo))
+        {
+          if (rtConnection_IsSecure(con))
+          {
+            uint32_t decryptedLength;
+
+            err = rtCipher_Decrypt(con->cipher, msginfo->data, msginfo->dataLength, con->decryption_buffer, RTMSG_SEND_BUFFER_SIZE, &decryptedLength);
+
+            if (err != RT_OK)
+            {
+              rtLog_Error("failed to decrypted payload: %s", rtStrError(err));
+            }
+            else
+            {
+              memcpy(msginfo->data, con->decryption_buffer, decryptedLength);
+              msginfo->data[decryptedLength] = '\0';
+              msginfo->dataLength = decryptedLength;
+            }
+          }
+          else
+          {
+            rtLog_Error("cannot decrypt message without cipher");
+          }
+        }
+#endif
       }
     }
 

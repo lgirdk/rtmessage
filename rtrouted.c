@@ -19,6 +19,7 @@
 ##########################################################################
 */
 #include "rtMessage.h"
+#include "rtCipher.h"
 #include "rtDebug.h"
 #include "rtLog.h"
 #include "rtEncoder.h"
@@ -45,12 +46,9 @@
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <time.h>
-
 #include "rtRoutingTree.h"
 #include "rtm_discovery_api.h"
 #include "local_benchmarking.h"
-
-
 #include <cJSON.h>
 
 #ifdef INCLUDE_BREAKPAD
@@ -84,6 +82,10 @@ typedef struct
   int                       bytes_to_read;
   int                       read_buffer_capacity;
   rtMessageHeader           header;
+#ifdef WITH_SPAKE2
+  uint8_t*                  encryption_key;
+  uint8_t*                  encryption_buffer;
+#endif
 } rtConnectedClient;
 
 typedef struct
@@ -114,6 +116,7 @@ rtVector routes;
 rtRoutingTree routingTree;
 rtList g_discovery_result = NULL;
 static int g_enable_traffic_monitor = 0;
+int is_running = 1;
 //rtListener        listeners[RTMSG_MAX_LISTENERS];
 //rtRouteEntry      routes[RTMSG_MAX_ROUTES];
 
@@ -121,6 +124,12 @@ static int g_enable_traffic_monitor = 0;
 #define MAX_TIMESTAMP_ENTRIES 2000
 static struct timespec g_entry_exit_timestamps[MAX_TIMESTAMP_ENTRIES][2];
 static int g_timestamp_index;
+#endif
+
+#if WITH_SPAKE2
+rtCipher* g_cipher = NULL;
+char* g_spake2_L = NULL;
+char* g_spake2_w0 = NULL;
 #endif
 
 static rtError
@@ -174,52 +183,59 @@ rtRouted_FileExists(char const* s)
 }
 
 static rtError
-rtRouted_ParseConfig(char const* fname)
+rtRouted_ReadTextFile(char const* fname, char** content)
 {
-  int       i;
-  int       n;
-  char*     buff;
-  FILE*     fin;
-  cJSON*    json;
-  cJSON*    listeners;
-
-  if (!fname || strlen(fname) == 0)
+  FILE* pf;
+  rtError err = RT_OK;
+  size_t sz;
+  *content = NULL;
+  rtLog_Info("reading file %s", fname);
+  pf = fopen(fname, "r");
+  if (pf)
   {
-    rtLog_Warn("cannot prase empty configuration file");
-    return RT_OK;
-  }
-
-  if (!rtRouted_FileExists(fname))
-  {
-    rtLog_Error("configuration file %s doesn't exist", fname);
-    return RT_OK;
-  }
-
-  n = 0;
-  buff = NULL;
-  fin = NULL;
-  json = NULL;
-
-  // take easy way out. this is used to store contents of configuration file
-  buff = (char *) malloc(8192);
-  buff[0] = '\0';
-
-
-  rtLog_Debug("parsing configuration from file %s", fname);
-
-  fin = fopen(fname, "r");
-  if (fin)
-  {
-    char temp[256];
-    while (fgets(temp, sizeof(temp), fin))
-      strncat(buff, temp, strlen(temp));
-    fclose(fin);
+    fseek(pf, 0L, SEEK_END);
+    sz = (size_t)ftell(pf);
+    rewind(pf);
+    *content = malloc(sz+1);
+    if(fread(*content, 1, sz, pf) != sz)
+    {
+      free(*content);
+      *content = NULL;
+      rtLog_Error("failed to read file %s. %s", fname, strerror(errno));
+      err = RT_FAIL;
+    }
+    (*content)[sz] = 0;
+    fclose(pf);
   }
   else
   {
-    rtLog_Error("failed to open configuration file %s. %s", fname, strerror(errno));
-    exit(1);
+    rtLog_Error("failed to open file %s. %s", fname, strerror(errno));
+    err = RT_FAIL;
   }
+  return err;
+}
+
+static rtError
+rtRouted_ParseConfig(char const* fname)
+{
+  int       i;
+  int       n = 0;
+  char*     buff = NULL;
+  cJSON*    json = NULL;
+  cJSON*    listeners = NULL;
+#if WITH_SPAKE2
+  cJSON*    spake2plus = NULL;
+#endif
+  if (!fname || strlen(fname) == 0)
+  {
+    rtLog_Warn("cannot prase empty configuration file");
+    return RT_FAIL;
+  }
+
+  rtLog_Debug("parsing configuration from file %s", fname);
+
+  if(rtRouted_ReadTextFile(fname, &buff) != RT_OK)
+    return RT_FAIL;
 
   json = cJSON_Parse(buff);
   free(buff);
@@ -256,6 +272,70 @@ rtRouted_ParseConfig(char const* fname)
         }
       }
     }
+#if WITH_SPAKE2
+    spake2plus = cJSON_GetObjectItem(json, "spake2plus");
+    if (spake2plus)
+    {
+      cJSON* item;
+
+      rtLog_Info("parsing spake2 config");
+
+      item = cJSON_GetObjectItem(spake2plus, "L");
+      if(item)
+      {
+        if(strncmp(item->valuestring, "file:", 5) == 0)
+        {
+          if(rtRouted_ReadTextFile(item->valuestring+5, &g_spake2_L) != RT_OK)
+            g_spake2_L = NULL;
+        }
+        else
+        {
+          g_spake2_L = malloc(strlen(item->valuestring)+1);
+          strcpy(g_spake2_L, item->valuestring);
+        }
+      }
+
+      item = cJSON_GetObjectItem(spake2plus, "w0");
+      if(item)
+      {
+        if(strncmp(item->valuestring, "file:", 5) == 0)
+        {
+          if(rtRouted_ReadTextFile(item->valuestring+5, &g_spake2_w0) != RT_OK)
+            g_spake2_w0 = NULL;
+
+        }
+        else
+        {
+          g_spake2_w0 = malloc(strlen(item->valuestring)+1);
+          strcpy(g_spake2_w0, item->valuestring);
+        }
+      }
+
+      rtLog_Debug("g_spake2_L=%s", g_spake2_L ? g_spake2_L : "(null)");
+      rtLog_Debug("g_spake2_w0=%s", g_spake2_w0 ? g_spake2_w0 : "(null)");
+
+      if(g_spake2_L && g_spake2_w0)
+      {
+        rtLog_Info("spake2plus config valid");
+      }
+      else
+      {
+        rtLog_Warn("cannot enable spake2plus due to missing config param(s): %s", 
+          (!g_spake2_L && !g_spake2_w0) ? "L and w0" :
+          (!g_spake2_L) ? "L" : "w0");
+        if(g_spake2_L)
+        {
+          free(g_spake2_L);
+          g_spake2_L = NULL;
+        }
+        if(g_spake2_w0)
+        {
+          free(g_spake2_w0);
+          g_spake2_w0 = NULL;
+        }
+      }
+    }
+#endif
     cJSON_Delete(json);
   }
   return RT_OK;
@@ -323,6 +403,14 @@ rtConnectedClient_Destroy(rtConnectedClient* clnt)
   if (clnt->send_buffer)
     free(clnt->send_buffer);
 
+#if WITH_SPAKE2
+  if (clnt->encryption_key)
+    free(clnt->encryption_key);
+
+  if (clnt->encryption_buffer)
+    free(clnt->encryption_buffer);
+#endif
+
   free(clnt);
 }
 
@@ -383,8 +471,10 @@ rtRouted_SendMessage(rtMessageHeader * request_hdr, rtMessage message)
     }
   }
   if(!found_dest)
+  {
     rtLog_Error("Could not find route to destination.");
-
+  }
+  rtMessage_FreeByteArray(buffer);
   return ret;
 }
 
@@ -430,6 +520,55 @@ rtRouted_ForwardMessage(rtConnectedClient* sender, rtMessageHeader* hdr, uint8_t
   new_header.flags = hdr->flags;
   strncpy(new_header.topic, hdr->topic, RTMSG_HEADER_MAX_TOPIC_LENGTH-1);
   strncpy(new_header.reply_topic, hdr->reply_topic, RTMSG_HEADER_MAX_TOPIC_LENGTH-1);
+
+#ifdef WITH_SPAKE2
+  if(hdr->flags & rtMessageFlags_Encrypted && sender->encryption_key)
+  {
+    uint32_t decryptedLength;
+
+    rtLog_Debug("received encrypted message key=%p topic=%s", sender->encryption_key, hdr->topic);
+
+    if(rtCipher_DecryptWithKey( sender->encryption_key, 
+                                buff, 
+                                n, 
+                                sender->encryption_buffer, 
+                                RTMSG_CLIENT_READ_BUFFER_SIZE, 
+                                &decryptedLength ) != RT_OK)
+    { 
+      rtLog_Error("failed to decrypt message");
+      return RT_FAIL;
+    }
+
+    buff = sender->encryption_buffer;
+    n = decryptedLength;
+    new_header.payload_length = decryptedLength;
+    new_header.flags &= ~rtMessageFlags_Encrypted;
+  }
+
+  /*since each client has a unique key we must re-encrypt using its key*/
+  if(subscription->client->encryption_key)
+  {
+    uint32_t encryptedLength;
+
+    rtLog_Debug("sending encrypted message");
+
+    if(rtCipher_EncryptWithKey( subscription->client->encryption_key, 
+                                buff, 
+                                n, 
+                                subscription->client->encryption_buffer, 
+                                RTMSG_CLIENT_READ_BUFFER_SIZE, 
+                                &encryptedLength ) != RT_OK)
+    { 
+      rtLog_Error("failed to encrypt message");
+      return RT_FAIL;
+    }
+    buff = subscription->client->encryption_buffer;
+    n = encryptedLength;
+    new_header.payload_length = encryptedLength;
+    new_header.flags |= rtMessageFlags_Encrypted;
+  }
+#endif
+
   rtMessageHeader_Encode(&new_header, subscription->client->send_buffer);
 
   // rtDebug_PrintBuffer("fwd header", subscription->client->send_buffer, new_header.length);
@@ -721,7 +860,8 @@ rtRouted_OnMessageDiscoverObjectElements(rtConnectedClient* sender, rtMessageHea
       prep_reply_header_from_request(&new_header, hdr);
       if (RT_OK != rtRouted_SendMessage(&new_header, response))
         rtLog_Info("Response couldn't be sent.");
-      rtMessage_Release(response);    }
+      rtMessage_Release(response);   
+    }
   }
   else
     rtLog_Error("Cannot create response message to registered components.");
@@ -741,7 +881,7 @@ rtRouted_OnMessageDiscoverElementObjects(rtConnectedClient* sender, rtMessageHea
 
   if(RT_OK != rtMessage_FromBytes(&msgIn, buff, n))
   {
-    rtLog_Warn("Bad DiscoverObjectElements message");
+    rtLog_Warn("Bad DiscoverElementObjects message");
     rtLog_Warn("Sender %s", sender->ident);
     return;
   }
@@ -868,11 +1008,100 @@ rtRouted_OnMessageDiagnostics(rtConnectedClient* sender, rtMessageHeader* hdr, u
     g_timestamp_index = 0;
 #endif
   }
+  else if(0 == strncmp(RTROUTER_DIAG_CMD_SHUTDOWN, cmd, sizeof(RTROUTER_DIAG_CMD_SHUTDOWN)))
+  {
+    is_running = 0;
+  }
   else
     rtLog_Error("Unknown diag command: %s", cmd);
+  rtMessage_Release(msg);
   (void)sender;
   (void)hdr;
 }
+
+#ifdef WITH_SPAKE2
+
+static void
+rtRouted_CreateSpake2CipherInstance()
+{
+  rtError err;
+  rtMessage config;
+
+  if(g_cipher)
+    return;
+
+  if(!g_spake2_L || !g_spake2_w0)
+  {
+    rtLog_Error("cannot create spake2 cipher without L and w0 config values");
+    return;
+  }
+
+  rtMessage_Create(&config);
+  rtMessage_SetString(config, RT_CIPHER_SPAKE2_VERIFY_L, g_spake2_L);
+  rtMessage_SetString(config, RT_CIPHER_SPAKE2_VERIFY_W0, g_spake2_w0);
+  rtMessage_SetBool(config, RT_CIPHER_SPAKE2_IS_SERVER, true);
+
+  err = rtCipher_CreateCipherSpake2Plus(&g_cipher, config);
+
+  rtMessage_Release(config);
+
+  if(err != RT_OK)
+  {
+    g_cipher = NULL;
+    rtLog_Error("failed to initialize spake2 based cipher");
+    //todo return error to client
+    return;
+  }
+}
+
+static void
+rtRouted_OnMessageKeyExchange(rtConnectedClient* sender, rtMessageHeader* hdr, uint8_t const* buff, int n)
+{
+  rtError err;
+  rtMessage msg;
+  const char * type = NULL;
+  rtMessage response = NULL;
+
+  (void)hdr;
+
+  rtMessage_FromBytes(&msg, buff, n);
+  err = rtMessage_GetString(msg, "type", &type);
+  if (err != RT_OK || !type)
+    return;
+
+  if (strcmp(type, "spake2plus") == 0)
+  {
+    if (!g_cipher)
+    {
+      rtRouted_CreateSpake2CipherInstance();
+      if (!g_cipher)
+        return;
+    }
+
+    if(RT_OK == rtCipher_RunKeyExchangeServer(g_cipher, msg, &response, &sender->encryption_key))
+    {
+      if(response)
+      {
+        rtLog_Debug("sending key exchange response");
+        rtMessageHeader new_header;
+        prep_reply_header_from_request(&new_header, hdr);
+        if(rtRouted_SendMessage(&new_header, response) != RT_OK)
+          rtLog_Error("key exchange response couldn't be sent.");
+      }
+
+      if(sender->encryption_key)
+      {
+        if(!sender->encryption_buffer)
+        {
+          sender->encryption_buffer = (uint8_t *) malloc(RTMSG_CLIENT_READ_BUFFER_SIZE);
+          memset(sender->encryption_buffer, 0, RTMSG_CLIENT_READ_BUFFER_SIZE);
+          rtLog_Debug("key exchange complete");
+        }
+      }
+    }
+  }
+}
+#endif
 
 static rtError
 rtRouted_OnMessage(rtConnectedClient* sender, rtMessageHeader* hdr, uint8_t const* buff,
@@ -908,51 +1137,18 @@ rtRouted_OnMessage(rtConnectedClient* sender, rtMessageHeader* hdr, uint8_t cons
   {
     rtRouted_OnMessageDiagnostics(sender, hdr, buff, n);
   }
+#ifdef WITH_SPAKE2
+  else if (strcmp(hdr->topic, RTROUTED_KEY_EXCHANGE) == 0)
+  {
+    rtRouted_OnMessageKeyExchange(sender, hdr, buff, n);
+  }
+#endif  
   else
   {
     rtLog_Info("no handler for message:%s", hdr->topic);
   }
   return RT_OK;
 }
-
-#if 0
-static int
-rtRouted_IsTopicMatch(char const* topic, char const* exp)
-{
-  char const* t = topic;
-  char const* e = exp;
-
-
-  while (*t && *e)
-  {
-    if (*e == '*')
-    {
-      while (*t && *t != '.')
-        t++;
-      e++;
-    }
-
-    if (*e == '>')
-    {
-      while (*t)
-        t++;
-      e++;
-    }
-
-    if (!(*t || *e))
-      break;
-
-    if (*t != *e)
-      break;
-
-    t++;
-    e++;
-  }
-
-  // rtLogInfo("match[%d]: %s <> %s", !(*t || *e), topic, exp);
-  return !(*t || *e);
-}
-#endif
 
 static void
 rtConnectedClient_Init(rtConnectedClient* clnt, int fd, struct sockaddr_storage* remote_endpoint)
@@ -967,6 +1163,10 @@ rtConnectedClient_Init(rtConnectedClient* clnt, int fd, struct sockaddr_storage*
   memset(clnt->read_buffer, 0, RTMSG_CLIENT_READ_BUFFER_SIZE);
   memset(clnt->send_buffer, 0, RTMSG_CLIENT_READ_BUFFER_SIZE);
   clnt->read_buffer_capacity = RTMSG_CLIENT_READ_BUFFER_SIZE;
+#ifdef WITH_SPAKE2
+  clnt->encryption_key = NULL;
+  clnt->encryption_buffer = NULL;
+#endif
   rtMessageHeader_Init(&clnt->header);
 }
 
@@ -1295,6 +1495,27 @@ rtRouted_BindListener(char const* socket_name, int no_delay)
   return RT_OK;
 }
 
+
+void freeListener(void* p)
+{
+  free(p);
+}
+void freeClient(void* p)
+{
+  rtConnectedClient* client = (rtConnectedClient*)p;
+  free(client->read_buffer);
+  free(client->send_buffer);
+  free(client);
+}
+void freeRoute(void* p)
+{
+  rtRouteEntry* route = (rtRouteEntry*)p;
+  if(route->subscription)
+    free(route->subscription);
+  free(route);
+}
+
+
 int main(int argc, char* argv[])
 {
   int c;
@@ -1358,6 +1579,9 @@ int main(int argc, char* argv[])
     rtRoutingTree_AddTopicRoute(routingTree, RTM_DISCOVER_OBJECT_ELEMENTS, (void *)route);
     rtRoutingTree_AddTopicRoute(routingTree, RTM_DISCOVER_ELEMENT_OBJECTS, (void *)route);
     rtRoutingTree_AddTopicRoute(routingTree, RTROUTER_DIAG_DESTINATION, (void *)route);
+#ifdef WITH_SPAKE2
+    rtRoutingTree_AddTopicRoute(routingTree, RTROUTED_KEY_EXCHANGE, (void *)route);
+#endif
   }
 
   while (1)
@@ -1446,7 +1670,7 @@ int main(int argc, char* argv[])
     }
   }
 
-  while (1)
+  while (is_running)
   {
     int n;
     int                         max_fd;
@@ -1515,8 +1739,20 @@ int main(int argc, char* argv[])
     }
   }
 
-  rtVector_Destroy(listeners, NULL);
-  rtVector_Destroy(clients, NULL);
+  rtVector_Destroy(listeners, freeListener);
+  rtVector_Destroy(clients, freeClient);
+  rtVector_Destroy(routes, freeRoute);
+  rtRoutingTree_Destroy(routingTree);
+  rtList_Destroy(g_discovery_result, NULL);
+  fclose(pid_file);
+#if WITH_SPAKE2
+  if(g_cipher)
+    rtCipher_Destroy(g_cipher);
+  if(g_spake2_L)
+    free(g_spake2_L);
+  if(g_spake2_w0)
+    free(g_spake2_w0);
+#endif
 
   return 0;
 }

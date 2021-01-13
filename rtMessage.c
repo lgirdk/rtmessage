@@ -21,7 +21,7 @@
 #define _GNU_SOURCE 1
 #include "rtError.h"
 #include "rtMessage.h"
-#include "base64.h"
+#include "rtBase64.h"
 #include "rtAtomic.h"
 
 #include <cJSON.h>
@@ -220,6 +220,24 @@ rtMessage_SetInt32(rtMessage message, char const* name, int32_t value)
   return RT_OK;
 }
 
+rtError
+rtMessage_SetBool(rtMessage m, char const* name, bool b)
+{
+  cJSON_AddBoolToObject(m->json, name, b);
+  return RT_OK;
+}
+
+rtError
+rtMessage_GetBool(rtMessage const m, char const* name, bool* b)
+{
+  cJSON* p = cJSON_GetObjectItem(m->json, name);
+  if (!p)
+    return RT_FAIL;
+
+  *b = (p->type == cJSON_True);
+  return RT_OK;
+}
+
 /**
  * Add double field to the message
  * @param message to be modified
@@ -289,7 +307,7 @@ rtMessage_GetBinaryData(rtMessage message, char const* name, void ** ptr, uint32
   {
     const unsigned char * value;
     value = (unsigned char *)p->valuestring;
-	if(RT_OK == base64_decode(value, strlen((const char *)value), ptr, size))
+	if(RT_OK == rtBase64_decode(value, strlen((const char *)value), ptr, size))
 	{
       return RT_OK;
 	}
@@ -458,7 +476,7 @@ rtMessage_AddBinaryData(rtMessage message, char const* name, void const * ptr, c
   unsigned char * encoded_string = NULL;
   uint32_t encoded_string_size = 0;
 
-  if(RT_OK == base64_encode((const unsigned char *)ptr, size, &encoded_string, &encoded_string_size))
+  if(RT_OK == rtBase64_encode((const unsigned char *)ptr, size, &encoded_string, &encoded_string_size))
   {
     rtMessage_SetString(message, name, (char *)encoded_string);
     free(encoded_string);

@@ -44,7 +44,8 @@ typedef enum
   rtMessageFlags_Response = 0x02,
   rtMessageFlags_Undeliverable = 0x04,
   rtMessageFlags_Tainted = 0x08,
-  rtMessageFlags_RawBinary = 0x10
+  rtMessageFlags_RawBinary = 0x10,
+  rtMessageFlags_Encrypted = 0x20
 } rtMessageFlags;
 
 typedef struct

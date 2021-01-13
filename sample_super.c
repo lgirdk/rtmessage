@@ -22,14 +22,20 @@
 #include "rtLog.h"
 #include "rtMessage.h"
 #include "rtVector.h"
+#include "rtm_discovery_api.h"
+#if WITH_SPAKE2
+#include "spake2password.h"
+#endif
 #include <stdlib.h>
 #include <getopt.h>
 #include <unistd.h>
 #include <string.h>
 
-#define MAX_TOPICS 5
+#define MAX_TOPICS 20
+#define MAX_ALIAS 20
 #define MAX_TOPIC_LEN 256
 
+static rtConnection g_connection;
 static int messageReceived = 0;
 
 void printHelp()
@@ -38,10 +44,17 @@ void printHelp()
   printf("\t -S --send  send a message\n");
   printf("\t -R --request  send a request and get response\n");
   printf("\t -L --listen for messages\n");
+  printf("\t -W --disc_wildcarddest  discover wildcard destinations\n");
+  printf("\t -O --disc_objelem  discover object elements\n"); 
+  printf("\t -E --disc_elemobjs  discover element objects\n");
+  printf("\t -C --disc_regcomps  discover registered components\n");
   printf("\t -t --topic  topic path (default: \"A.B.C\")\n");
   printf("\t -m --msg  text message to send (default: \"Hello World!\")\n");
   printf("\t -w --wait  seconds to wait before exiting (default: 30)\n");
-  printf("\t -s --socket socket path of rtrouted (default: \"tcp://127.0.0.1:10001\")\n");
+  printf("\t -b --broker uri (default: \"tcp://127.0.0.1:10001\")\n");
+#ifdef WITH_SPAKE2
+  printf("\t -s --secure enable encryption (default: false)\n");
+#endif
   printf("\t -l --log-level log level (default: RT_LOG_DEBUG)\n");
   printf("\t -h --help show help info\n");
   fflush(stdout);
@@ -66,7 +79,7 @@ void onMessage(rtMessageHeader const* hdr, uint8_t const* buff, uint32_t n, void
   rtMessage_FromBytes(&req, buff, n);
 
   rtMessage_ToString(req, &buff2, &buff_length);
-  rtLog_Info("sample_super got message:%.*s", buff_length, buff2);
+  printf("sample_super got message:%.*s\n", buff_length, buff2);
   free(buff2);
 
   rtMessage_Release(req);
@@ -74,7 +87,7 @@ void onMessage(rtMessageHeader const* hdr, uint8_t const* buff, uint32_t n, void
   if (rtMessageHeader_IsRequest(hdr))
   {
     rtMessage res;
-    rtLog_Info("sample_super message was request so sending response.");
+    printf("sample_super message was request so sending response.\n");
     rtMessage_Create(&res);
     rtMessage_SetString(res, "reply", "Success");
     rtConnection_SendResponse(con, hdr, res, 1000);
@@ -84,25 +97,204 @@ void onMessage(rtMessageHeader const* hdr, uint8_t const* buff, uint32_t n, void
   messageReceived = 1;
 }
 
+void discoverWildcardDestinations(const char * expression)
+{
+    rtError err = RT_OK;
+    rtMessage msg, rsp;
+
+    rtMessage_Create(&msg);
+    rtMessage_SetString(msg, RTM_DISCOVERY_EXPRESSION, expression);
+
+    err = rtConnection_SendRequest(g_connection, msg, RTM_DISCOVER_WILDCARD_DESTINATIONS, &rsp, 3000);
+
+    rtMessage_Release(msg);
+    msg = rsp;
+
+    if(RT_OK == err)
+    {
+        int result;
+        const char * value = NULL;
+
+        if((RT_OK == rtMessage_GetInt32(msg, RTM_DISCOVERY_RESULT, &result)) && (RT_OK == result))
+        {
+            int32_t size, length, i;
+
+            rtMessage_GetInt32(msg, RTM_DISCOVERY_COUNT, &size);
+            rtMessage_GetArrayLength(msg, RTM_DISCOVERY_ITEMS, &length);
+
+            printf("discoverWildcardDestinations %s has %d items:\n", expression, length);
+
+            for (i = 0; i < length; i++)
+            {
+                if (RT_OK == rtMessage_GetStringItem(msg, RTM_DISCOVERY_ITEMS, i, &value))
+                {
+                    printf("%d: %s\n", i, value);
+                }
+            }
+
+            rtMessage_Release(msg);
+
+        }
+        else
+        {
+            rtLog_Error("discoverWildcardDestinations failed to read result");
+            rtMessage_Release(msg);
+        }
+    }
+    else
+    {
+        rtLog_Error("discoverWildcardDestinations SendRequest failed err:%d", err);
+    }
+}
+
+void discoverObjectElements(const char * object)
+{
+    rtError err = RT_OK;
+    rtMessage msg, rsp;
+
+    rtMessage_Create(&msg);
+    rtMessage_SetString(msg, RTM_DISCOVERY_EXPRESSION, object);
+
+    err = rtConnection_SendRequest(g_connection, msg, RTM_DISCOVER_OBJECT_ELEMENTS, &rsp, 3000);
+
+    rtMessage_Release(msg);
+    msg = rsp;
+
+    if(RT_OK == err)
+    {
+        int32_t size, length, i;
+        const char * value = NULL;
+
+        rtMessage_GetInt32(msg, RTM_DISCOVERY_COUNT, &size);
+        rtMessage_GetArrayLength(msg, RTM_DISCOVERY_ITEMS, &length);
+
+        printf("discoverObjectElements %s has %d items:\n", object, length);
+
+        for (i = 0; i < length; i++)
+        {
+            if (RT_OK == rtMessage_GetStringItem(msg, RTM_DISCOVERY_ITEMS, i, &value))
+            {
+              printf("%d: %s\n", i, value);
+            }
+        }
+
+        rtMessage_Release(msg);
+
+    }
+    else
+    {
+        rtLog_Error("discoverObjectElements SendRequest failed err:%d", err);
+    }
+}
+
+void discoverElementObjects(const char* elements)
+{
+    rtError err = RT_OK;
+    rtMessage msg, rsp;
+
+    rtMessage_Create(&msg);
+    rtMessage_SetInt32(msg, RTM_DISCOVERY_COUNT, 1);
+    rtMessage_AddString(msg, RTM_DISCOVERY_ITEMS, elements);
+
+    err = rtConnection_SendRequest(g_connection, msg, RTM_DISCOVER_ELEMENT_OBJECTS, &rsp, 3000);
+
+    rtMessage_Release(msg);
+    msg = rsp;
+
+    if(RT_OK == err)
+    {
+        int result;
+        const char * value = NULL;
+
+        if((RT_OK == rtMessage_GetInt32(msg, RTM_DISCOVERY_RESULT, &result)) && (RT_OK == result))
+        {
+            int num_elements = 0;
+            int i;
+            rtMessage_GetInt32(msg, RTM_DISCOVERY_COUNT, &num_elements);
+
+            printf("discoverElementObjects %s has %d items:\n", elements, num_elements);
+
+            for (i = 0; i < num_elements; i++)
+            {
+                if (RT_OK == rtMessage_GetStringItem(msg, RTM_DISCOVERY_ITEMS, i, &value))
+                {
+                  printf("%d: %s\n", i, value);
+                }
+            }
+        }
+        else
+        {
+            rtLog_Error("discoverElementObjects failed to read result");
+        }
+        rtMessage_Release(msg);
+    }
+    else
+    {
+        rtLog_Error("discoverElementObjects SendRequest failed err:%d", err);
+    }
+}
+
+void discoverRegisteredComponents()
+{
+    rtError err = RT_OK;
+    rtMessage msg;
+    rtMessage out;
+    rtMessage_Create(&out);
+    rtMessage_SetInt32(out, "dummy", 0);
+    
+    err = rtConnection_SendRequest(g_connection, out, RTM_DISCOVER_REGISTERED_COMPONENTS, &msg, 3000);
+
+    if(RT_OK == err)
+    {
+        int32_t size, length, i;
+        const char * value = NULL;
+
+        rtMessage_GetInt32(msg, RTM_DISCOVERY_COUNT, &size);
+        rtMessage_GetArrayLength(msg, RTM_DISCOVERY_ITEMS, &length);
+
+        printf("discoverRegisteredComponents has %d items:\n", length);
+
+        for (i = 0; i < length; i++)
+        {
+            if (RT_OK == rtMessage_GetStringItem(msg, RTM_DISCOVERY_ITEMS, i, &value))
+            {
+                printf("%d: %s\n", i, value);
+            }
+        }
+
+        rtMessage_Release(msg);
+    }
+    else
+    {
+        rtLog_Error("discoverRegisteredComponents SendRequest failed err:%d", err);
+    }
+}
+
+
 int main(int argc, char* argv[])
 {
   rtError err;
-  rtConnection con;
+  rtMessage config;
   int sending = 0;
   int requesting = 0;
   int listening = 0;
   int numTopics = 0;
-  
-  char topics[MAX_TOPICS][MAX_TOPIC_LEN] = { "A.B.C", "\0", "\0", "\0", "\0" };
+  int numAlias = 0;
+#if WITH_SPAKE2
+  int isSecure = 0;
+#endif  
+  char topics[MAX_TOPICS][MAX_TOPIC_LEN] = { "A.B.C", "\0", "\0", "\0", "\0", "\0", "\0", "\0", "\0", "\0", "\0", "\0", "\0", "\0", "\0", "\0", "\0", "\0", "\0", "\0" };
+  char alias[MAX_ALIAS][MAX_TOPIC_LEN] = { "\0", "\0", "\0", "\0", "\0", "\0", "\0", "\0", "\0", "\0", "\0", "\0", "\0", "\0", "\0", "\0", "\0", "\0", "\0", "\0" };
   char const* message = "Hello World";
   int wait = 30;
-  char const* socket = "tcp://127.0.0.1:10001";
+  char const* broker_uri = "tcp://127.0.0.1:10001";
+  int disc_wildcarddest=0, disc_objelems=0, disc_elemobjs=0, disc_regcomps=0;
+  char *disc_wildcarddest_name=NULL, *disc_objelems_name=NULL, *disc_elemobjs_name=NULL;
 
   printf("logfile=/opt/logs/rtmessage_%d.log\n", getpid());
 
   rtLog_SetLevel(RT_LOG_DEBUG);
   rtLogSetLogHandler(logHandler);
-
 
   while (1)
   {
@@ -114,16 +306,24 @@ int main(int argc, char* argv[])
       {"send",        no_argument,        0, 'S' },
       {"request",     no_argument,        0, 'R' },
       {"listen",      no_argument,        0, 'L' },
+      {"disc_wildcarddest", required_argument,    0, 'W' },
+      {"disc_objelems",     required_argument,    0, 'O' },
+      {"disc_elemobjs",     required_argument,    0, 'E' },
+      {"disc_regcomps",     no_argument,          0, 'C' },
       {"topic",       required_argument,  0, 't' },
+      {"alias",       required_argument,  0, 'a' },
       {"msg",         required_argument,  0, 'm' },
       {"wait",        required_argument,  0, 'w' },
-      {"socket",      required_argument,  0, 's' },
+      {"broker",      required_argument,  0, 'b' },
+#ifdef WITH_SPAKE2
+      {"secure",      required_argument,  0, 's' },
+#endif
       {"log-level",   required_argument,  0, 'l' },
       {"help",        no_argument,        0, 'h' },
       {0, 0, 0, 0}
     };
 
-    c = getopt_long(argc, argv, "SRLt:m:w:s:l:h", long_options, &option_index);
+    c = getopt_long(argc, argv, "SRLW:O:E:Ct:a:m:w:b:sl:h", long_options, &option_index);
     if (c == -1)
       break;
 
@@ -141,6 +341,21 @@ int main(int argc, char* argv[])
         listening = 1;
         printf("Argument: Listen=true\n");
         break;
+      case 'W':
+        disc_wildcarddest = 1;
+        disc_wildcarddest_name = optarg;
+        break;
+      case 'O':
+        disc_objelems = 1;
+        disc_objelems_name = optarg;
+        break;
+      case 'E':
+        disc_elemobjs = 1;
+        disc_elemobjs_name = optarg;
+        break;
+      case 'C':
+        disc_regcomps = 1;
+        break;
       case 't':
         if(numTopics < MAX_TOPICS)
         {
@@ -154,7 +369,19 @@ int main(int argc, char* argv[])
             printf("Argument: max supported topics %d reached.  Ignoring %s\n", MAX_TOPICS, optarg);
         }
         break;
-      case 'm':
+      case 'a':
+        if(numAlias < MAX_ALIAS)
+        {
+            strncpy(alias[numAlias], optarg, MAX_TOPIC_LEN-1);
+            alias[numAlias][255] = 0;
+            printf("Argument: Alias=%s\n", alias[numAlias]);
+            numAlias++;
+        }
+        else
+        {
+            printf("Argument: max supported aliases %d reached.  Ignoring %s\n", MAX_ALIAS, optarg);
+        }
+        break;      case 'm':
         message = optarg;
         printf("Argument: Message=%s\n", message);
         break;
@@ -168,10 +395,16 @@ int main(int argc, char* argv[])
             printf("Argument: Log level=%s\n", rtLogLevelToString(rtLog_GetLevel()));
         }
         break;
-      case 's':
-        socket = optarg;
-        printf("Argument: Socket=%s\n", socket);
+      case 'b':
+        broker_uri = optarg;
+        printf("Argument: broker_uri=%s\n", broker_uri);
         break;
+#ifdef WITH_SPAKE2
+      case 's':
+        isSecure = 1;
+        printf("Argument: secure enabled\n");
+        break;
+#endif
       case 'h':
         printHelp();
         break;
@@ -180,19 +413,46 @@ int main(int argc, char* argv[])
     }
   }
 
-  if(!sending && !requesting && !listening)
+  if(!sending && !requesting && !listening && !disc_wildcarddest && !disc_objelems && !disc_elemobjs && !disc_regcomps)
   {
     printHelp();
     exit(0);
   }
 
-  rtLog_Info("connecting to socket %s\n", socket);
+  rtMessage_Create(&config);
+  rtMessage_SetString(config, "appname", "sample_super");
+  rtMessage_SetString(config, "uri", broker_uri);
+  rtMessage_SetInt32(config, "start_router", 0);
 
-  err = rtConnection_Create(&con, "APP1", socket);
+#ifdef WITH_SPAKE2
+  if(isSecure)
+  {
+    char psk[LAF_PSK_LEN]={0};
+    int ret = get_psk(psk,
+#ifdef WITH_SPAKE2_TEST_PIN
+      PSK_TEST
+#else
+      PSK_1
+#endif
+      );
+    if(ret)
+    {
+      printf("failed to get spake2 psk: %d\n", ret);
+      exit(5);
+    }
+    rtMessage_SetString(config, "spake2_psk", psk);
+  }
+#endif
+
+  printf("connecting to router at %s\n", broker_uri);
+
+  err = rtConnection_CreateWithConfig(&g_connection, config);
+
+  rtMessage_Release(config);
 
   if(err != RT_OK)
   {
-    rtLog_Error("rtConnection_Create failed with error %s trying to connect to %s. Exiting.\n", rtStrError(err), socket);
+    printf("rtConnection_Create failed with error %s trying to connect to %s. Exiting.\n", rtStrError(err), broker_uri);
     exit(0);
   }
 
@@ -203,16 +463,16 @@ int main(int argc, char* argv[])
     {
         rtMessage m;
 
-        rtLog_Info("sending on topic %s\n", topics[i]);
+        printf("sending on topic %s\n", topics[i]);
 
         rtMessage_Create(&m);
         rtMessage_SetString(m, "msg", message);
-        err = rtConnection_SendMessage(con, m, topics[i]);
+        err = rtConnection_SendMessage(g_connection, m, topics[i]);
         rtMessage_Release(m);
         if(err != RT_OK)
         {
-          rtLog_Error("rtConnection_SendMessage failed with error %s trying to send message to topic %s. Exiting.\n", rtStrError(err), topics[i]);
-          rtConnection_Destroy(con);
+          printf("rtConnection_SendMessage failed with error %s trying to send message to topic %s. Exiting.\n", rtStrError(err), topics[i]);
+          rtConnection_Destroy(g_connection);
           exit(0);
         }
     }
@@ -227,24 +487,44 @@ int main(int argc, char* argv[])
         rtMessage res;
         rtMessage_Create(&req);
         rtMessage_SetString(req, "msg", message);
-        err = rtConnection_SendRequest(con, req, topics[i], &res, 2000);
+        err = rtConnection_SendRequest(g_connection, req, topics[i], &res, 2000);
         rtMessage_Release(req);
         if (err == RT_OK)
         {
           char* p = NULL;
           uint32_t len = 0;
           rtMessage_ToString(res, &p, &len);
-          rtLog_Info("\tGot response::%.*s\n", len, p);
+          printf("\tGot response::%.*s\n", len, p);
           free(p);
           rtMessage_Release(res);
         }
         else
         {
-          rtLog_Error("rtConnection_SendRequest failed with error %s trying to send message to topic %s. Exiting.\n", rtStrError(err), topics[i]);
-          rtConnection_Destroy(con);
+          printf("rtConnection_SendRequest failed with error %s trying to send message to topic %s. Exiting.\n", rtStrError(err), topics[i]);
+          rtConnection_Destroy(g_connection);
           exit(0);
         }
     }
+  }
+
+  if(disc_wildcarddest)
+  {
+    discoverWildcardDestinations(disc_wildcarddest_name);
+  }
+
+  if(disc_objelems)
+  {
+    discoverObjectElements(disc_objelems_name);
+  }
+
+  if(disc_elemobjs)
+  {
+    discoverElementObjects(disc_elemobjs_name);
+  }
+
+  if(disc_regcomps)
+  {
+    discoverRegisteredComponents();
   }
   
   if(listening)
@@ -254,8 +534,16 @@ int main(int argc, char* argv[])
     {
         if(topics[i][0] != '\0')
         {
-            rtLog_Info("listening on topic %s\n", topics[i]);
-            rtConnection_AddListener(con, topics[i], onMessage, con);
+            printf("listening on topic %s\n", topics[i]);
+            rtConnection_AddListener(g_connection, topics[i], onMessage, g_connection);
+
+            /*if aliases are asked for, apply all aliases to the first topic*/
+            if(i == 0)
+            {
+              int j = 0;
+              for(j = 0; j < numAlias; ++j)
+                rtConnection_AddAlias(g_connection, topics[i], alias[j]);
+            }
         }
         else
         {
@@ -265,19 +553,21 @@ int main(int argc, char* argv[])
 
     while(wait > 0)
     {
+      printf("waiting %d seconds\n", wait);
       sleep(1);
-      if(messageReceived)
-      {
-        wait = 0;
-      }
+      wait--;
+      //if(messageReceived)
+      //{
+       // wait = 0;
+      //}
     }
   }
 
   sleep(1);
 
-  rtConnection_Destroy(con);
+  rtConnection_Destroy(g_connection);
 
-  rtLog_Info("super_sample exiting\n");  
+  printf("super_sample exiting\n");  
 
   return 0;
 }

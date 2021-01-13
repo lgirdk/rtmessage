@@ -29,10 +29,10 @@ extern "C" {
 #define RBUS_BASE64_DATA_SIZE_LIMIT (RBUS_BINARY_DATA_SIZE_LIMIT * 4 / 3)
 
 /* Note: out_size accounts for the string terminator as well.*/
-rtError base64_encode(const void * in, const unsigned int in_size, unsigned char ** out, unsigned int *out_size);
+rtError rtBase64_encode(const void * in, const unsigned int in_size, unsigned char ** out, unsigned int *out_size);
 
 /* Note: in_size shouldn't account for the string terminator (if present).*/
-rtError base64_decode(const unsigned char * in, const unsigned int in_size,  void ** out, unsigned int *out_size);
+rtError rtBase64_decode(const unsigned char * in, const unsigned int in_size,  void ** out, unsigned int *out_size);
 
 #ifdef __cplusplus
 }

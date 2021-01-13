@@ -21,7 +21,9 @@
 #include "rtConnection.h"
 #include "rtLog.h"
 #include "rtMessage.h"
-
+#if WITH_SPAKE2
+#include "spake2password.h"
+#endif
 #include <unistd.h>
 #include <getopt.h>
 #include <stdio.h>
@@ -48,6 +50,9 @@ int main(int argc, char* argv[])
   rtMessage     message;
   rtMessage     config;
   rtConnection  connection;
+#if WITH_SPAKE2
+  int           isSecure = 0;
+#endif
 
   uri = NULL;
   topic = NULL;
@@ -63,10 +68,11 @@ int main(int argc, char* argv[])
     {
       { "broker",   required_argument, 0, 'b' },
       { "topic",    required_argument, 0, 't' },
+      { "secure",    required_argument, 0, 's' },
       { 0, 0, 0, 0 }
     };
 
-    int c = getopt_long(argc, argv, "b:t:", longOptions, &optionIndex);
+    int c = getopt_long(argc, argv, "b:t:s", longOptions, &optionIndex);
     if (c == -1)
       break;
 
@@ -79,7 +85,11 @@ int main(int argc, char* argv[])
       case 't':
       topic = optarg;
       break;
-
+#if WITH_SPAKE2
+      case 's':
+      isSecure = 1;
+      break;
+#endif
       case '?':
       break;
 
@@ -128,12 +138,32 @@ int main(int argc, char* argv[])
   rtMessage_SetString(config, "uri", uri);
   rtMessage_SetInt32(config, "start_router", 0);
 
+#ifdef WITH_SPAKE2
+  if(isSecure)
+  {
+    char psk[LAF_PSK_LEN]={0};
+    int ret = get_psk(psk,
+#ifdef WITH_SPAKE2_TEST_PIN
+      PSK_TEST
+#else
+      PSK_1
+#endif
+      );
+    if(ret)
+    {
+      printf("failed to get spake2 psk: %d\n", ret);
+      exit(5);
+    }
+    rtMessage_SetString(config, "spake2_psk", psk);
+  }
+#endif
+
   err = rtConnection_CreateWithConfig(&connection, config);
   if (err != RT_OK)
   {
     rtLog_Error("failed to create connection to router %s. %s",
       uri, rtStrError(err));
-    exit(5);
+    exit(6);
   }
 
   err = rtConnection_SendMessage(connection, message, topic);
@@ -141,7 +171,7 @@ int main(int argc, char* argv[])
   {
     rtLog_Error("failed to send message on topic %s. %s",
       topic, rtStrError(err));
-    exit(6);
+    exit(7);
   }
 
   rtLog_Info("send[%s]: %s", topic, rtStrError(err));
