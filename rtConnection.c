@@ -1183,9 +1183,9 @@ rtConnection_Read(rtConnection con, int32_t timeout)
       if(size >= 5)
       {
         if(size == 5 || size == 10 || size == 20 || size == 40 || size == 80)
-          rtLog_Warn("callback_message_list has reached %lu", (unsigned long)size);
-        else if(size > 100)
-          rtLog_Error("callback_message_list has reached %lu", (unsigned long)size);
+          rtLog_Debug("callback_message_list has reached %lu", (unsigned long)size);
+        else if(size >= 100)
+          rtLog_Debug("callback_message_list has reached %lu", (unsigned long)size);
       }
 
       /*wake the callback thread up to process new message*/
