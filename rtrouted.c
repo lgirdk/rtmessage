@@ -735,12 +735,17 @@ rtRouted_OnMessageDiscoverElementObjects(rtConnectedClient* sender, rtMessageHea
           rtRoutingTree_GetTopicRoutes(routingTree, expression, &routes);
           if(routes)
           {
+            size_t count;
+            rtList_GetSize(routes, &count);
+
+            rtMessage_SetInt32(response, RTM_DISCOVERY_COUNT, (int32_t)count);
             rtList_GetFront(routes, &item);
-            if (item)
+            while(item)
             {
               rtTreeRoute* treeRoute;
               rtRouteEntry *route;
               rtListItem_GetData(item, (void**)&treeRoute);
+              rtListItem_GetNext(item, &item);
               route = treeRoute->route;
               if(route)
               {
@@ -750,7 +755,10 @@ rtRouted_OnMessageDiscoverElementObjects(rtConnectedClient* sender, rtMessageHea
             }
           }
           if(!set)
-              rtMessage_AddString(response, RTM_DISCOVERY_ITEMS, "");
+          {
+            rtMessage_SetInt32(response, RTM_DISCOVERY_COUNT, 1);
+            rtMessage_AddString(response, RTM_DISCOVERY_ITEMS, "");
+          }
         }
         else
         {
