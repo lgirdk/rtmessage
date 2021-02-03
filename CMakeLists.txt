@@ -122,7 +122,6 @@ if (BUILD_RTMESSAGE_LIB)
       rtList.c
       rtRetainable.c
       base64.c
-      rtRoutingTree.c
       local_benchmarking.c)
     if (ENABLE_RDKLOGGER)
       add_dependencies(rtMessage cJSON rdklogger)
@@ -156,7 +155,7 @@ endif (BUILD_DATAPROVIDER_LIB)
 
 if (BUILD_RTMESSAGE_ROUTED)
     message ("Building rtrouted")
-    add_executable(rtrouted rtrouted.c)
+    add_executable(rtrouted rtrouted.c rtRoutingTree.c)
     if (BUILD_FOR_DESKTOP)
       add_dependencies(rtrouted cJSON)
     endif(BUILD_FOR_DESKTOP)

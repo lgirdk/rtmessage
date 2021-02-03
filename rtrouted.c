@@ -682,7 +682,7 @@ rtRouted_OnMessageDiscoverObjectElements(rtConnectedClient* sender, rtMessageHea
       size_t count = 0;
       int found = 0;
       rtRouteEntry* route = NULL;
-      //rtLog_Debug("ElementEnumeration expression=%s", expression);
+      rtLog_Debug("ElementEnumeration expression=%s", expression);
       for (i = 0; i < rtVector_Size(routes); i++)
       {
         route = (rtRouteEntry *) rtVector_At(routes, i);

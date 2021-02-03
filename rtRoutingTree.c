@@ -128,26 +128,33 @@ static void tokenizeExpression(const char* expression)
 
 static void removeTopicFromRoutes(rtRoutingTree rt, rtTreeTopic* topic)
 {
+    rtListItem childItem;
+    rtTreeTopic* childTopic;
     rtListItem routeItem;
+    rtTreeRoute* route;
+    size_t size;
 
-    rtList_GetFront(rt->routeList, &routeItem);
-
+    rtList_GetFront(topic->routeList, &routeItem);
     while(routeItem)
     {
-        rtListItem next;
-        rtTreeRoute* route;
-        size_t size;
-
         rtListItem_GetData(routeItem, (void**)&route);
+
         rtList_RemoveItemByCompare(route->topicList, topic, rtList_ComparePointer, NULL);
-        rtListItem_GetNext(routeItem, &next);
         /*if the route's topicList has become empty, then remove the whole route*/
         rtList_GetSize(route->topicList, &size);
         if(size == 0)
-            rtList_RemoveItem(rt->routeList, routeItem, freeTreeRoute);
-        routeItem = next;
+            rtList_RemoveItemByCompare(rt->routeList, route, rtList_ComparePointer, freeTreeRoute);
+
+        rtListItem_GetNext(routeItem, &routeItem);
     }
 
+    rtList_GetFront(topic->childList, &childItem);
+    while(childItem)
+    {
+        rtListItem_GetData(childItem, (void**)&childTopic);
+        removeTopicFromRoutes(rt, childTopic);
+        rtListItem_GetNext(childItem, &childItem);
+    }
 }
 
 static rtTreeTopic* getChildByName(rtRoutingTree rt, rtTreeTopic* parent, const char* name, int create, int* created, int remove)
@@ -161,9 +168,19 @@ static rtTreeTopic* getChildByName(rtRoutingTree rt, rtTreeTopic* parent, const 
     {
         rtTreeTopic* treeTopic;
         rtListItem_GetData(item, (void**)&treeTopic);
-        if(strcmp(treeTopic->name, name) == 0 
-          /*if a query contains a row instance id, a square bracket alias, or wildcard * 
-            we need to match any curly brace i table name.  
+        if(strcmp(treeTopic->name, name) == 0)
+        {
+            /* we can remove if its an exact match*/
+            if(remove)
+            {
+              removeTopicFromRoutes(rt, treeTopic);
+              rtList_RemoveItem(parent->childList, item, freeTreeTopic);
+              return NULL;
+            }
+            return treeTopic;
+        }
+        /* if a query contains a row instance id, a square bracket alias, or wildcard * 
+           we need to match any curly brace i table name.  
            E.G. '1' or '2' or '[someAlias]' or '*' all match {i}
            This assumes that instance paths (paths with instance id or alias) is never registered
            with the broker.  Only the non-instance path (with {i}) gets registered.
@@ -173,17 +190,11 @@ static rtTreeTopic* getChildByName(rtRoutingTree rt, rtTreeTopic* parent, const 
            and that * is only used as a wildcard.
            If a user ever tries to use { or [ or * as anything other then table register, alias, wildcard, then
            the following line will have to be modified.
-          */
-          || (treeTopic->name[0] == '{' && (isdigit(name[0]) || name[0] == '[' || name[0] == '*'))
-        )
+        */
+        else if(treeTopic->name[0] == '{' && (isdigit(name[0]) || name[0] == '[' || name[0] == '*'))
         {
-            if(remove)
-            {
-              rtList_RemoveItem(parent->childList, item, freeTreeTopic);
-              removeTopicFromRoutes(rt, treeTopic);
-              return NULL;
-              break;  
-            }
+            /* note that we don't handle the remove flag here because you should never create or remove instance ids themselves in the tree
+               however, as a safeguard we only do remove in the above branch when name is an exact match*/
             return treeTopic;
         }
         rtListItem_GetNext(item, &item);

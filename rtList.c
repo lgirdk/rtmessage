@@ -17,7 +17,7 @@
   * limitations under the License.
 */
 #include "rtList.h"
-
+#include "rtLog.h"
 #include <errno.h>
 #include <stdlib.h>
 #include <memory.h>
@@ -213,6 +213,13 @@ rtError rtList_InsertAfter(rtList list, void* data, rtListItem at, rtListItem* p
 }
 rtError rtList_RemoveItem(rtList list, rtListItem item, rtList_Cleanup destroyer)
 {
+#ifdef RT_LIST_ERROR_CHECKING
+  rtListItem tmp = list->front;
+  while(tmp && tmp != item)
+    tmp = tmp->next;
+  if(tmp != item)
+    rtLog_Error("rtList_RemoveItem list %p doesn't own item %p", list, item);
+#endif
   RT_CHECK_INVALID_ARG(list);
   RT_CHECK_INVALID_ARG(item);
   if(item->prev)
