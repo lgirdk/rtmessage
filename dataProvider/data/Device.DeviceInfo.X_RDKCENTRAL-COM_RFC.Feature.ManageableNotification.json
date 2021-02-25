@@ -1,9 +1,0 @@
-{
-  "name": "Device.DeviceInfo.X_RDKCENTRAL-COM_RFC.Feature.ManageableNotification",
-  "provider" : "RFCFeature",
-  "is_list" : false,
-  "properties":
-    [
-	{"name": "Enable", "type": "string", "optional": false, "writable": true, "version": "2.0"}
-    ]
-}
