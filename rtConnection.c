@@ -261,18 +261,14 @@ rtConnection_ConnectAndRegister(rtConnection con)
       }
       else
       {
-        rtLog_Error("error connecting to %s:%d. %s", remote_addr, remote_port, strerror(err));
-        break;
+        sleep(1);
+        rtLog_Warn("error connecting to %s:%d. %s", remote_addr, remote_port, strerror(err));
       }
     }
     else
     {
       break;
     }
-  }
-  if(-1 == ret) {
-    rtLog_Error("Client connect timed out");
-    return RT_ERROR_TIMEOUT;
   }
 
   rtSocket_GetLocalEndpoint(con->fd, &con->local_endpoint);
