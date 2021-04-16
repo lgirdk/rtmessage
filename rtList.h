@@ -24,6 +24,10 @@
 #include "rtError.h"
 #include <stdio.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 struct _rtList;
 typedef struct _rtList* rtList;
 
@@ -42,6 +46,7 @@ rtError rtList_PushBack(rtList list, void* data, rtListItem* pitem);
 rtError rtList_InsertBefore(rtList list, void* data, rtListItem at, rtListItem* pitem);
 rtError rtList_InsertAfter(rtList list, void* data, rtListItem at, rtListItem* pitem);
 rtError rtList_RemoveItem(rtList list, rtListItem item, rtList_Cleanup destroyer);
+rtError rtList_RemoveItemWithData(rtList list, void* data, rtList_Cleanup destroyer);
 rtError rtList_RemoveItemByCompare(rtList list, const void* comparison, rtList_Compare compare, rtList_Cleanup destroyer);
 rtError rtList_RemoveAllItems(rtList list, rtList_Cleanup destroyer);
 int     rtList_HasItem(rtList list, const void* comparison, rtList_Compare compare);
@@ -57,4 +62,7 @@ rtError rtListItem_GetPrev(rtListItem item, rtListItem* pitem);
 void rtList_Cleanup_Free(void* item);
 int rtList_Compare_String(const void* left, const void* right);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

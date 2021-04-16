@@ -124,6 +124,10 @@ rtRoutingTree:
         This api does not restrict anything for the rbus use case so it is up to rbus providers to be careful not to share topics.
  */
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct rtTreeRoute
 {
     void* route;  
@@ -159,4 +163,7 @@ void rtRoutingTree_LogStats(rtRoutingTree rt);
 void rtRoutingTree_LogTopicTree(rtRoutingTree rt);
 void rtRoutingTree_LogRouteList(rtRoutingTree rt);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

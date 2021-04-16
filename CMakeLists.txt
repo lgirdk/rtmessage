@@ -164,6 +164,7 @@ if (BUILD_RTMESSAGE_LIB)
       rtSocket.c
       rtVector.c
       rtList.c
+      rtTime.c
       rtRetainable.c
       rtBase64.c
       local_benchmarking.c)
@@ -308,13 +309,13 @@ if (BUILD_RTMESSAGE_SAMPLE_APP)
     target_link_libraries(rtrouted_diag ${LIBRARY_LINKER_OPTIONS} rtMessage)
 endif (BUILD_RTMESSAGE_SAMPLE_APP)
 
-ADD_CUSTOM_TARGET(distclean COMMAND ${CMAKE_COMMAND} -E remove ${CMAKE_CURRENT_BINARY_DIR}/*.so dmcli sample_provider_* sample_super sample_req sample_res sample_send sample_recv rtrouted rtsend CMakeCache.txt)
+ADD_CUSTOM_TARGET(distclean COMMAND ${CMAKE_COMMAND} -E remove ${CMAKE_CURRENT_BINARY_DIR}/*.so dmcli sample_provider_* sample_super sample_req sample_res sample_send sample_recv rtrouted rtsend rtrouted_diag CMakeCache.txt)
 
 install (TARGETS LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 install (TARGETS ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
 
 install (TARGETS rtrouted rtMessage rtrouted_diag sample_super RUNTIME DESTINATION bin LIBRARY DESTINATION lib)
-install (FILES rtMessage.h rtMessageHeader.h rtError.h rtConnection.h rtVector.h rtRetainable.h rtLog.h rtList.h rtAtomic.h rtm_discovery_api.h DESTINATION "include/rtmessage")
+install (FILES rtMessage.h rtMessageHeader.h rtError.h rtConnection.h rtVector.h rtRetainable.h rtLog.h rtList.h rtTime.h rtAtomic.h rtm_discovery_api.h rtAdvisory.h DESTINATION "include/rtmessage")
 
 if (BUILD_FOR_DESKTOP)
     install(FILES ${CMAKE_CURRENT_BINARY_DIR}/deps/src/cJSON/libcjson.so ${CMAKE_CURRENT_BINARY_DIR}/deps/src/cJSON/libcjson.so.1 ${CMAKE_CURRENT_BINARY_DIR}/deps/src/cJSON/libcjson.so.1.6.0 DESTINATION lib)

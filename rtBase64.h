@@ -39,6 +39,5 @@ rtError rtBase64_decode(const unsigned char * in, const unsigned int in_size,  v
 #ifdef __cplusplus
 }
 #endif
-
 #endif
 

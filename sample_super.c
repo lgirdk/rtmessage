@@ -21,6 +21,7 @@
 #include "rtConnection.h"
 #include "rtLog.h"
 #include "rtMessage.h"
+#include "rtAdvisory.h"
 #include "rtVector.h"
 #include "rtm_discovery_api.h"
 #if WITH_SPAKE2
@@ -44,6 +45,7 @@ void printHelp()
   printf("\t -S --send  send a message\n");
   printf("\t -R --request  send a request and get response\n");
   printf("\t -L --listen for messages\n");
+  printf("\t -A --listen for advisory messages from rtrouted\n");
   printf("\t -W --disc_wildcarddest  discover wildcard destinations\n");
   printf("\t -O --disc_objelem  discover object elements\n"); 
   printf("\t -E --disc_elemobjs  discover element objects\n");
@@ -274,6 +276,7 @@ int main(int argc, char* argv[])
   int sending = 0;
   int requesting = 0;
   int listening = 0;
+  int listening_advisory = 0;
   int numTopics = 0;
   int numAlias = 0;
 #if WITH_SPAKE2
@@ -303,6 +306,7 @@ int main(int argc, char* argv[])
       {"send",              no_argument,        0, 'S' },
       {"request",           no_argument,        0, 'R' },
       {"listen",            no_argument,        0, 'L' },
+      {"listen_advisory",   no_argument,        0, 'A' },
       {"disc_wildcarddest", required_argument,  0, 'W' },
       {"disc_objelems",     required_argument,  0, 'O' },
       {"disc_elemobjs",     required_argument,  0, 'E' },
@@ -321,7 +325,7 @@ int main(int argc, char* argv[])
       {0, 0, 0, 0}
     };
 
-    c = getopt_long(argc, argv, "SRLW:O:E:Ct:a:m:w:b:r:sl:h", long_options, &option_index);
+    c = getopt_long(argc, argv, "SRLAW:O:E:Ct:a:m:w:b:r:sl:h", long_options, &option_index);
     if (c == -1)
       break;
 
@@ -338,6 +342,10 @@ int main(int argc, char* argv[])
       case 'L':
         listening = 1;
         printf("Argument: Listen=true\n");
+        break;
+      case 'A':
+        listening_advisory = 1;
+        printf("Argument: Listen Advisory=true\n");
         break;
       case 'W':
         disc_wildcarddest = 1;
@@ -409,13 +417,14 @@ int main(int argc, char* argv[])
 #endif
       case 'h':
         printHelp();
+        exit(0);
         break;
       default:
         fprintf(stderr, "?? getopt returned character code 0%o ??\n\trun sample_super -h for help", c);
     }
   }
 
-  if(!sending && !requesting && !listening && !disc_wildcarddest && !disc_objelems && !disc_elemobjs && !disc_regcomps)
+  if(!sending && !requesting && !listening && !listening_advisory && !disc_wildcarddest && !disc_objelems && !disc_elemobjs && !disc_regcomps)
   {
     printHelp();
     exit(0);
@@ -542,7 +551,7 @@ int main(int argc, char* argv[])
     discoverRegisteredComponents();
   }
   
-  if(listening)
+  if(listening || listening_advisory)
   {
     int i;
     for(i = 0; i < numTopics; ++i)
@@ -564,6 +573,12 @@ int main(int argc, char* argv[])
         {
             break;
         }
+    }
+
+    if(listening_advisory)
+    {
+        printf("listening on advisory topic %s\n", RTMSG_ADVISORY_TOPIC);
+        rtConnection_AddListener(g_connection, RTMSG_ADVISORY_TOPIC, onMessage, g_connection);
     }
 
     while(wait > 0)

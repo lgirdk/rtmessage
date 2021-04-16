@@ -241,7 +241,22 @@ rtError rtList_RemoveItem(rtList list, rtListItem item, rtList_Cleanup destroyer
   list->size--;
   return RT_OK;
 }
-
+rtError rtList_RemoveItemWithData(rtList list, void* data, rtList_Cleanup destroyer)
+{
+  rtListItem item;
+  RT_CHECK_INVALID_ARG(list);
+  item = list->front;
+  while(item && item->data != data)
+    item = item->next;
+  if(!item)
+  {
+#ifdef RT_LIST_ERROR_CHECKING
+    rtLog_Error("rtList_RemoveItemWithData list %p doesn't own data %p", list, data);
+#endif
+    return RT_ERROR_INVALID_ARG;
+  }
+  return rtList_RemoveItem(list, item, destroyer);
+}
 rtError rtList_RemoveItemByCompare(rtList list, const void* comparison, rtList_Compare compare, rtList_Cleanup destroyer)
 {
   rtListItem item = list->front;

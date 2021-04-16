@@ -18,25 +18,23 @@
 # limitations under the License.
 ##########################################################################
 */
-#ifndef __RT_ENCODER_H__
-#define __RT_ENCODER_H__
+#ifndef __RTMSG_ADVISORY_H__
+#define __RTMSG_ADVISORY_H__
 
-#include "rtError.h"
-#include <stdint.h>
+#define RTMSG_ADVISORY_TOPIC "_RTROUTED.ADVISORY"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-rtError rtEncoder_EncodeInt32(uint8_t** itr, int32_t n);
-rtError rtEncoder_DecodeInt32(uint8_t const** itr, int32_t* n);
-rtError rtEncoder_EncodeUInt32(uint8_t** itr, uint32_t n);
-rtError rtEncoder_DecodeUInt32(uint8_t const** itr, uint32_t* n);
-rtError rtEncoder_EncodeUInt16(uint8_t** itr, uint16_t n);
-rtError rtEncoder_DecodeUInt16(uint8_t const** itr, uint16_t* n);
-rtError rtEncoder_DecodeStr(uint8_t const** itr, char* s, uint32_t len);
-rtError rtEncoder_EncodeString(uint8_t** itr, char const* s, uint32_t* n);
-rtError rtEncoder_DecodeString(uint8_t const** itr, char* s, uint32_t* n);
+typedef enum
+{
+  rtAdviseClientConnect,
+  rtAdviseClientDisconnect
+} rtAdviseEvent;
+
+#define RTMSG_ADVISE_EVENT "event"
+#define RTMSG_ADVISE_INBOX "inbox"
 
 #ifdef __cplusplus
 }

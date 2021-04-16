@@ -24,6 +24,10 @@
 #include "rtError.h"
 #include <stdio.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 struct _rtVector;
 typedef struct _rtVector* rtVector;
 
@@ -43,5 +47,8 @@ void*   rtVector_Find(rtVector v, const void* comparison, rtVector_Compare compa
 void rtVector_Cleanup_Free(void* item);
 int rtVector_Compare_String(const void* left, const void* right);
 
+#ifdef __cplusplus
+}
+#endif
 #endif
 

@@ -18,25 +18,25 @@
 # limitations under the License.
 ##########################################################################
 */
-#ifndef __RT_ENCODER_H__
-#define __RT_ENCODER_H__
+#ifndef __RTMSG_THREADPOOL_H__
+#define __RTMSG_THREADPOOL_H__
 
 #include "rtError.h"
-#include <stdint.h>
+#include <stddef.h>
+
+#define RT_ERROR_THREADPOOL_TASKS_CANCELLED   3000
+#define RT_ERROR_THREADPOOL_TASK_PENDING      3001
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-rtError rtEncoder_EncodeInt32(uint8_t** itr, int32_t n);
-rtError rtEncoder_DecodeInt32(uint8_t const** itr, int32_t* n);
-rtError rtEncoder_EncodeUInt32(uint8_t** itr, uint32_t n);
-rtError rtEncoder_DecodeUInt32(uint8_t const** itr, uint32_t* n);
-rtError rtEncoder_EncodeUInt16(uint8_t** itr, uint16_t n);
-rtError rtEncoder_DecodeUInt16(uint8_t const** itr, uint16_t* n);
-rtError rtEncoder_DecodeStr(uint8_t const** itr, char* s, uint32_t len);
-rtError rtEncoder_EncodeString(uint8_t** itr, char const* s, uint32_t* n);
-rtError rtEncoder_DecodeString(uint8_t const** itr, char* s, uint32_t* n);
+typedef struct _rtThreadPool* rtThreadPool;
+typedef void (*rtThreadPoolFunc)(void* userData);
+
+rtError rtThreadPool_Create(rtThreadPool* ppool, size_t maxThreadCount, size_t stackSize, int expireTime);
+rtError rtThreadPool_Destroy(rtThreadPool pool, int waitTimeMS);
+rtError rtThreadPool_RunTask(rtThreadPool pool, rtThreadPoolFunc func, void* userData);
 
 #ifdef __cplusplus
 }

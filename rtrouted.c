@@ -28,6 +28,7 @@
 #include "rtSocket.h"
 #include "rtVector.h"
 #include "rtConnection.h"
+#include "rtAdvisory.h"
 #include "rtrouter_diag.h"
 #include <arpa/inet.h>
 #include <errno.h>
@@ -75,6 +76,7 @@ typedef struct
   int                       fd;
   struct sockaddr_storage   endpoint;
   char                      ident[RTMSG_ADDR_MAX];
+  char                      inbox[RTMSG_HEADER_MAX_TOPIC_LENGTH];
   uint8_t*                  read_buffer;
   uint8_t*                  send_buffer;
   rtConnectionState         state;
@@ -134,6 +136,9 @@ char* g_spake2_w0 = NULL;
 
 static rtError
 rtRouted_BindListener(char const* socket_name, int no_delay);
+
+static void
+rtRouted_SendAdvisoryMessage(rtConnectedClient* clnt, rtAdviseEvent event);
 
 static void
 rtRouted_PrintHelp()
@@ -421,9 +426,8 @@ rtConnectedClient_Destroy(rtConnectedClient* clnt)
   free(clnt);
 }
 
-
 static rtError
-rtRouted_SendMessage(rtMessageHeader * request_hdr, rtMessage message)
+rtRouted_SendMessage(rtMessageHeader * request_hdr, rtMessage message, rtConnectedClient* skipClient)
 {
   rtError ret = RT_OK;
   ssize_t bytes_sent;
@@ -455,25 +459,28 @@ rtRouted_SendMessage(rtMessageHeader * request_hdr, rtMessage message)
         found_dest = 1;
         request_hdr->control_data = route->subscription->id;
         client = route->subscription->client;
-        rtMessageHeader_Encode(request_hdr, client->send_buffer);
-        struct iovec send_vec[] = {{client->send_buffer, request_hdr->header_length}, {(void *)buffer, size}};
-        struct msghdr send_hdr = {NULL, 0, send_vec, 2, NULL, 0, 0};
-        do
+        if(client != skipClient)
         {
-          bytes_sent = sendmsg(client->fd, &send_hdr, MSG_NOSIGNAL);
-          if (bytes_sent == -1)
+          rtMessageHeader_Encode(request_hdr, client->send_buffer);
+          struct iovec send_vec[] = {{client->send_buffer, request_hdr->header_length}, {(void *)buffer, size}};
+          struct msghdr send_hdr = {NULL, 0, send_vec, 2, NULL, 0, 0};
+          do
           {
-            if (errno == EBADF)
-              ret = rtErrorFromErrno(errno);
-            else
+            bytes_sent = sendmsg(client->fd, &send_hdr, MSG_NOSIGNAL);
+            if (bytes_sent == -1)
             {
-              rtLog_Warn("error forwarding message to client. %d %s", errno, strerror(errno));
-              ret = RT_FAIL;
+              if (errno == EBADF)
+                ret = rtErrorFromErrno(errno);
+              else
+              {
+                rtLog_Warn("error forwarding message to client. %d %s", errno, strerror(errno));
+                ret = RT_FAIL;
+              }
+              break;
             }
-            break;
-          }
 
-        } while(0);
+          } while(0);
+        }
       }
     }
   }
@@ -656,6 +663,13 @@ rtRouted_OnMessageSubscribe(rtConnectedClient* sender, rtMessageHeader* hdr, uin
         subscription->id = route_id;
         subscription->client = sender;
         rtRouted_AddRoute(rtRouted_ForwardMessage, expression, subscription);
+
+        if(strstr(expression, ".INBOX.") && sender->inbox[0] == '\0')
+        {
+            strncpy(sender->inbox, expression, RTMSG_HEADER_MAX_TOPIC_LENGTH);
+            rtLog_Debug("init client inbox to %s", sender->inbox);
+            rtRouted_SendAdvisoryMessage(sender, rtAdviseClientConnect);
+        }
       }
     }
     else
@@ -740,7 +754,7 @@ rtRouted_OnMessageDiscoverRegisteredComponents(rtConnectedClient* sender, rtMess
 
       rtMessageHeader new_header;
       prep_reply_header_from_request(&new_header, hdr);
-      if(RT_OK != rtRouted_SendMessage(&new_header, response))
+      if(RT_OK != rtRouted_SendMessage(&new_header, response, NULL))
           rtLog_Info("Response couldn't be sent.");
       rtMessage_Release(response);
   }
@@ -798,7 +812,7 @@ rtRouted_OnMessageDiscoverWildcardDestinations(rtConnectedClient* sender, rtMess
     /* Send this message back to the requestor.*/ 
     rtMessageHeader new_header;
     prep_reply_header_from_request(&new_header, hdr);
-    if(RT_OK != rtRouted_SendMessage(&new_header, response))
+    if(RT_OK != rtRouted_SendMessage(&new_header, response, NULL))
       rtLog_Info("Response couldn't be sent.");
     rtMessage_Release(response);
   }
@@ -871,7 +885,7 @@ rtRouted_OnMessageDiscoverObjectElements(rtConnectedClient* sender, rtMessageHea
       }
       rtMessageHeader new_header;
       prep_reply_header_from_request(&new_header, hdr);
-      if (RT_OK != rtRouted_SendMessage(&new_header, response))
+      if (RT_OK != rtRouted_SendMessage(&new_header, response, NULL))
         rtLog_Info("Response couldn't be sent.");
       rtMessage_Release(response);   
     }
@@ -966,7 +980,7 @@ rtRouted_OnMessageDiscoverElementObjects(rtConnectedClient* sender, rtMessageHea
     
     rtMessageHeader new_header;
     prep_reply_header_from_request(&new_header, hdr);
-    if (RT_OK != rtRouted_SendMessage(&new_header, response))
+    if (RT_OK != rtRouted_SendMessage(&new_header, response, NULL))
       rtLog_Info("Response to trace request couldn't be sent.");
     rtMessage_Release(response);
   }
@@ -1032,6 +1046,27 @@ rtRouted_OnMessageDiagnostics(rtConnectedClient* sender, rtMessageHeader* hdr, u
   (void)hdr;
 }
 
+static void
+rtRouted_SendAdvisoryMessage(rtConnectedClient* clnt, rtAdviseEvent event)
+{
+  rtMessage msg;
+  rtMessageHeader hdr;
+
+  rtMessage_Create(&msg);
+  rtMessage_SetInt32(msg, RTMSG_ADVISE_EVENT, event);
+  rtMessage_SetString(msg, RTMSG_ADVISE_INBOX, clnt->inbox);
+
+  rtMessageHeader_Init(&hdr);
+  hdr.topic_length = strlen(RTMSG_ADVISORY_TOPIC);
+  strncpy(hdr.topic, RTMSG_ADVISORY_TOPIC, RTMSG_HEADER_MAX_TOPIC_LENGTH-1);
+
+  rtLog_Debug("Sending advisory message");
+  if (RT_OK != rtRouted_SendMessage(&hdr, msg, clnt))
+    rtLog_Info("Failed to send advisory");
+
+  rtMessage_Release(msg);
+}
+
 #ifdef WITH_SPAKE2
 
 static rtError
@@ -1094,7 +1129,7 @@ rtRouted_OnMessageKeyExchange(rtConnectedClient* sender, rtMessageHeader* hdr, u
         rtLog_Debug("sending key exchange response");
         rtMessageHeader new_header;
         prep_reply_header_from_request(&new_header, hdr);
-        if(rtRouted_SendMessage(&new_header, response) != RT_OK)
+        if(rtRouted_SendMessage(&new_header, response, NULL) != RT_OK)
           rtLog_Error("key exchange response couldn't be sent.");
       }
 
@@ -1405,6 +1440,7 @@ rtRouted_RegisterNewClient(int fd, struct sockaddr_storage* remote_endpoint)
   remote_port = 0;
   new_client = (rtConnectedClient *) malloc(sizeof(rtConnectedClient));
   new_client->fd = -1;
+  new_client->inbox[0] = '\0';
 
   rtConnectedClient_Init(new_client, fd, remote_endpoint);
   rtSocketStorage_ToString(&new_client->endpoint, remote_address, sizeof(remote_address), &remote_port);
@@ -1740,6 +1776,7 @@ int main(int argc, char* argv[])
         if (err != RT_OK)
         {
           rtVector_RemoveItem(clients, clnt, NULL);
+          rtRouted_SendAdvisoryMessage(clnt, rtAdviseClientDisconnect);
           rtConnectedClient_Destroy(clnt);
           n--;
           continue;

@@ -28,6 +28,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include "rtLog.h"
+#include "rtTime.h"
 
 #ifndef WIN32
 #include <unistd.h>
@@ -118,7 +119,7 @@ const char* rtLogLevelToString(rtLogLevel l)
 
 rtLogLevel rtLogLevelFromString(char const* s)
 {
-  rtLogLevel level = RT_LOG_INFO;
+  rtLogLevel level = sLevel;
   if (s)
   {
     if (strcasecmp(s, "debug") == 0)
@@ -211,7 +212,10 @@ void rtLogPrintf(rtLogLevel level, const char* file, int line, const char* forma
   }
   else
   {
-    printf(RT_LOGPREFIX "%5s %s:%d -- Thread-%" RT_THREADID_FMT ": %s \n", rtLogLevelToString(level), path, line, threadId, buff);
+    rtTime_t tm;
+    char tbuff[50];
+    rtTime_Now(&tm);
+    printf("%s %5s %s:%d -- Thread-%" RT_THREADID_FMT ": %s \n", rtTime_ToString(&tm, tbuff), rtLogLevelToString(level), path, line, threadId, buff);
   }
 }
 

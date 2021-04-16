@@ -37,6 +37,10 @@
   static pthread_mutex_t g_atomic_mutex = PTHREAD_ERRORCHECK_MUTEX_INITIALIZER_NP;
 #endif
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 static inline void rt_atomic_fetch_add(atomic_int* var, int value)
 {
 #if defined(RT_ATOMIC_HAS_ATOMIC_FETCH)
@@ -65,4 +69,7 @@ static inline void rt_atomic_fetch_sub(atomic_int* var, int value)
 #endif
 }
 
+#ifdef __cplusplus
+}
+#endif
 #endif

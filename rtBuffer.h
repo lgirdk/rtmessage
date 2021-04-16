@@ -23,6 +23,10 @@
 
 #include "rtError.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 struct _rtBuffer;
 typedef struct _rtBuffer* rtBuffer;
 
@@ -36,4 +40,7 @@ rtError rtBuffer_WriteString(rtBuffer buff, char const* s, int n);
 rtError rtBuffer_ReadInt32(rtBuffer buff, int32_t* n);
 rtError rtBuffer_ReadString(rtBuffer buff, char** s, int* n);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

@@ -41,5 +41,4 @@ void rtRetainable_releaseInternal(rtRetainable* r, void (*Destructor)(rtRetainab
 #ifdef __cplusplus
 }
 #endif
-
 #endif
