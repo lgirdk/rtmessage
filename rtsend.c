@@ -22,7 +22,7 @@
 #include "rtLog.h"
 #include "rtMessage.h"
 #if WITH_SPAKE2
-#include "spake2password.h"
+#include "password.h"
 #endif
 #include <unistd.h>
 #include <getopt.h>
@@ -155,6 +155,7 @@ int main(int argc, char* argv[])
       exit(5);
     }
     rtMessage_SetString(config, "spake2_psk", psk);
+    rtMessage_SetInt32(config, "check_remote_router",1);
   }
 #endif
 

@@ -1,18 +1,23 @@
 /*
- * Copyright 2020 Comcast Cable
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *  http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+##########################################################################
+# If not stated otherwise in this file or this component's LICENSE
+# file the following copyright and licenses apply:
+#
+# Copyright 2019 RDK Management
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+##########################################################################
+*/
 #include "rtCipher.h"
 #include "rtError.h"
 #include "rtLog.h"
@@ -27,8 +32,7 @@
 #ifdef WITH_SPAKE2
 
 #include "spake2plus.h"
-#include "spake2common.h"
-#include "spake2verifydata.h"
+#include "common.h"
 
 #define APPLY_STRING_OPTION(message, option, variable, default)\
   {\
@@ -44,10 +48,7 @@ struct _rtCipher
   SPAKE2PLUS* spake2_ctx;
   uint8_t key[EVP_MAX_MD_SIZE];
   bool is_server;
-  bool isKeyExchangeRunning;
 };
-
-SPAKE2PLUS* g_spake2_context = NULL;
 
 static rtError
 CreateSpake2PlusInstance(rtMessage const opts, SPAKE2PLUS** spake2_ctx)
@@ -171,6 +172,7 @@ rtError
 rtCipher_CreateCipherSpake2Plus(rtCipher** cipher, rtMessage const opts)
 {
   rtError err;
+  SPAKE2PLUS* spake2_ctx = NULL;
 
   if (cipher == NULL)
   {
@@ -180,16 +182,12 @@ rtCipher_CreateCipherSpake2Plus(rtCipher** cipher, rtMessage const opts)
 
   *cipher = NULL;
 
-  if(!g_spake2_context)
-  {
-    err = CreateSpake2PlusInstance(opts, &g_spake2_context);
-    if(err != RT_OK)
-      return err;
-  }
+  err = CreateSpake2PlusInstance(opts, &spake2_ctx);
+  if(err != RT_OK)
+    return err;
 
   (*cipher) = malloc(sizeof(struct _rtCipher));
-  (*cipher)->spake2_ctx = g_spake2_context;
-  (*cipher)->isKeyExchangeRunning = false;
+  (*cipher)->spake2_ctx = spake2_ctx;
   (*cipher)->is_server = false;
   rtMessage_GetBool(opts, RT_CIPHER_SPAKE2_IS_SERVER, &(*cipher)->is_server);
 
@@ -204,10 +202,10 @@ rtCipher_Destroy(rtCipher* cipher)
   if (!cipher)
     return RT_OK;
 
-  free(cipher);
+  if (cipher->spake2_ctx)
+    spake2plus_free(cipher->spake2_ctx);
 
-  if (g_spake2_context)
-    spake2plus_free(g_spake2_context);
+  free(cipher);
 
   rtLog_Debug("rtCipher destroyed");
     
@@ -294,15 +292,7 @@ rtCipher_RunKeyExchangeClient(rtCipher* cipher, rtConnection con)
   uint8_t Fa[EVP_MAX_MD_SIZE];
   size_t Fa_len = 0;
 
-  if(cipher->isKeyExchangeRunning)
-  {
-    rtLog_Warn("spake2+ a key exchange is already running");
-    goto on_err;
-  }
-
   rtLog_Info("spake2+ running client key exchange using messages");
-
-  cipher->isKeyExchangeRunning = true;
 
   rtMessage_Create(&msg1);
   rtMessage_SetString(msg1, "type", "spake2plus");

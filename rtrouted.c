@@ -83,6 +83,7 @@ typedef struct
   int                       read_buffer_capacity;
   rtMessageHeader           header;
 #ifdef WITH_SPAKE2
+  rtCipher*                 cipher;
   uint8_t*                  encryption_key;
   uint8_t*                  encryption_buffer;
 #endif
@@ -127,7 +128,6 @@ static int g_timestamp_index;
 #endif
 
 #if WITH_SPAKE2
-rtCipher* g_cipher = NULL;
 char* g_spake2_L = NULL;
 char* g_spake2_w0 = NULL;
 #endif
@@ -223,6 +223,7 @@ rtRouted_ParseConfig(char const* fname)
   char*     buff = NULL;
   cJSON*    json = NULL;
   cJSON*    listeners = NULL;
+  cJSON*    loglevel = NULL;
 #if WITH_SPAKE2
   cJSON*    spake2plus = NULL;
 #endif
@@ -336,6 +337,11 @@ rtRouted_ParseConfig(char const* fname)
       }
     }
 #endif
+
+    loglevel = cJSON_GetObjectItem(json, "log_level");
+    if(loglevel)
+      rtLog_SetLevel(rtLogLevelFromString(loglevel->valuestring));
+
     cJSON_Delete(json);
   }
   return RT_OK;
@@ -404,9 +410,10 @@ rtConnectedClient_Destroy(rtConnectedClient* clnt)
     free(clnt->send_buffer);
 
 #if WITH_SPAKE2
+  if (clnt->cipher)
+    rtCipher_Destroy(clnt->cipher);
   if (clnt->encryption_key)
     free(clnt->encryption_key);
-
   if (clnt->encryption_buffer)
     free(clnt->encryption_buffer);
 #endif
@@ -522,11 +529,17 @@ rtRouted_ForwardMessage(rtConnectedClient* sender, rtMessageHeader* hdr, uint8_t
   strncpy(new_header.reply_topic, hdr->reply_topic, RTMSG_HEADER_MAX_TOPIC_LENGTH-1);
 
 #ifdef WITH_SPAKE2
-  if(hdr->flags & rtMessageFlags_Encrypted && sender->encryption_key)
+  if(hdr->flags & rtMessageFlags_Encrypted)
   {
     uint32_t decryptedLength;
 
-    rtLog_Debug("received encrypted message key=%p topic=%s", sender->encryption_key, hdr->topic);
+    rtLog_Debug("received encrypted message: key=%p topic=%s", sender->encryption_key, hdr->topic);
+
+    if(!sender->encryption_key)
+    {
+        rtLog_Info("no encryption key found, cannot decrypt message");
+        return RT_FAIL;
+    }
 
     if(rtCipher_DecryptWithKey( sender->encryption_key, 
                                 buff, 
@@ -1021,19 +1034,16 @@ rtRouted_OnMessageDiagnostics(rtConnectedClient* sender, rtMessageHeader* hdr, u
 
 #ifdef WITH_SPAKE2
 
-static void
-rtRouted_CreateSpake2CipherInstance()
+static rtError
+rtRouted_CreateSpake2CipherInstance(rtCipher** cipher)
 {
   rtError err;
   rtMessage config;
 
-  if(g_cipher)
-    return;
-
   if(!g_spake2_L || !g_spake2_w0)
   {
     rtLog_Error("cannot create spake2 cipher without L and w0 config values");
-    return;
+    return RT_ERROR;
   }
 
   rtMessage_Create(&config);
@@ -1041,17 +1051,17 @@ rtRouted_CreateSpake2CipherInstance()
   rtMessage_SetString(config, RT_CIPHER_SPAKE2_VERIFY_W0, g_spake2_w0);
   rtMessage_SetBool(config, RT_CIPHER_SPAKE2_IS_SERVER, true);
 
-  err = rtCipher_CreateCipherSpake2Plus(&g_cipher, config);
+  err = rtCipher_CreateCipherSpake2Plus(cipher, config);
 
   rtMessage_Release(config);
 
   if(err != RT_OK)
   {
-    g_cipher = NULL;
+    *cipher = NULL;
     rtLog_Error("failed to initialize spake2 based cipher");
     //todo return error to client
-    return;
   }
+  return err;
 }
 
 static void
@@ -1071,14 +1081,13 @@ rtRouted_OnMessageKeyExchange(rtConnectedClient* sender, rtMessageHeader* hdr, u
 
   if (strcmp(type, "spake2plus") == 0)
   {
-    if (!g_cipher)
+    if (!sender->cipher)
     {
-      rtRouted_CreateSpake2CipherInstance();
-      if (!g_cipher)
-        return;
+      if(rtRouted_CreateSpake2CipherInstance(&sender->cipher) != RT_OK)
+        return;/*TODO: send error message back to client*/
     }
 
-    if(RT_OK == rtCipher_RunKeyExchangeServer(g_cipher, msg, &response, &sender->encryption_key))
+    if(RT_OK == rtCipher_RunKeyExchangeServer(sender->cipher, msg, &response, &sender->encryption_key))
     {
       if(response)
       {
@@ -1164,6 +1173,7 @@ rtConnectedClient_Init(rtConnectedClient* clnt, int fd, struct sockaddr_storage*
   memset(clnt->send_buffer, 0, RTMSG_CLIENT_READ_BUFFER_SIZE);
   clnt->read_buffer_capacity = RTMSG_CLIENT_READ_BUFFER_SIZE;
 #ifdef WITH_SPAKE2
+  clnt->cipher = NULL;
   clnt->encryption_key = NULL;
   clnt->encryption_buffer = NULL;
 #endif
@@ -1746,8 +1756,6 @@ int main(int argc, char* argv[])
   rtList_Destroy(g_discovery_result, NULL);
   fclose(pid_file);
 #if WITH_SPAKE2
-  if(g_cipher)
-    rtCipher_Destroy(g_cipher);
   if(g_spake2_L)
     free(g_spake2_L);
   if(g_spake2_w0)

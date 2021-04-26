@@ -24,7 +24,7 @@
 #include "rtVector.h"
 #include "rtm_discovery_api.h"
 #if WITH_SPAKE2
-#include "spake2password.h"
+#include "password.h"
 #endif
 #include <stdlib.h>
 #include <getopt.h>
@@ -52,21 +52,14 @@ void printHelp()
   printf("\t -m --msg  text message to send (default: \"Hello World!\")\n");
   printf("\t -w --wait  seconds to wait before exiting (default: 30)\n");
   printf("\t -b --broker uri (default: \"tcp://127.0.0.1:10001\")\n");
+  printf("\t                  for uds: unix:///tmp/rtrouted\n");
+  printf("\t -r --max_retries max connection retries to attempt\n");
 #ifdef WITH_SPAKE2
   printf("\t -s --secure enable encryption (default: false)\n");
 #endif
   printf("\t -l --log-level log level (default: RT_LOG_DEBUG)\n");
   printf("\t -h --help show help info\n");
   fflush(stdout);
-}
-
-void logHandler(rtLogLevel level, const char* file, int line, int threadId, char* message)
-{
-  (void)level;
-  (void)file;
-  (void)line;
-  (void)threadId;
-  printf("%d: %s\n", getpid(), message);
 }
 
 void onMessage(rtMessageHeader const* hdr, uint8_t const* buff, uint32_t n, void* closure)
@@ -87,9 +80,12 @@ void onMessage(rtMessageHeader const* hdr, uint8_t const* buff, uint32_t n, void
   if (rtMessageHeader_IsRequest(hdr))
   {
     rtMessage res;
-    printf("sample_super message was request so sending response.\n");
+    static int response_index = 1;
+    char buff[200];
+    snprintf(buff, 200, "Response message: What's up! (%d)", response_index++); 
+    printf("sample_super sendinging response.\n");
     rtMessage_Create(&res);
-    rtMessage_SetString(res, "reply", "Success");
+    rtMessage_SetString(res, "reply", buff);
     rtConnection_SendResponse(con, hdr, res, 1000);
     rtMessage_Release(res);
   }
@@ -288,13 +284,14 @@ int main(int argc, char* argv[])
   char const* message = "Hello World";
   int wait = 30;
   char const* broker_uri = "tcp://127.0.0.1:10001";
+  int max_retries = 0;
   int disc_wildcarddest=0, disc_objelems=0, disc_elemobjs=0, disc_regcomps=0;
   char *disc_wildcarddest_name=NULL, *disc_objelems_name=NULL, *disc_elemobjs_name=NULL;
+  int message_index = 1;
 
   printf("logfile=/opt/logs/rtmessage_%d.log\n", getpid());
 
   rtLog_SetLevel(RT_LOG_DEBUG);
-  rtLogSetLogHandler(logHandler);
 
   while (1)
   {
@@ -303,27 +300,28 @@ int main(int argc, char* argv[])
 
     static struct option long_options[] = 
     {
-      {"send",        no_argument,        0, 'S' },
-      {"request",     no_argument,        0, 'R' },
-      {"listen",      no_argument,        0, 'L' },
-      {"disc_wildcarddest", required_argument,    0, 'W' },
-      {"disc_objelems",     required_argument,    0, 'O' },
-      {"disc_elemobjs",     required_argument,    0, 'E' },
-      {"disc_regcomps",     no_argument,          0, 'C' },
-      {"topic",       required_argument,  0, 't' },
-      {"alias",       required_argument,  0, 'a' },
-      {"msg",         required_argument,  0, 'm' },
-      {"wait",        required_argument,  0, 'w' },
-      {"broker",      required_argument,  0, 'b' },
+      {"send",              no_argument,        0, 'S' },
+      {"request",           no_argument,        0, 'R' },
+      {"listen",            no_argument,        0, 'L' },
+      {"disc_wildcarddest", required_argument,  0, 'W' },
+      {"disc_objelems",     required_argument,  0, 'O' },
+      {"disc_elemobjs",     required_argument,  0, 'E' },
+      {"disc_regcomps",     no_argument,        0, 'C' },
+      {"topic",             required_argument,  0, 't' },
+      {"alias",             required_argument,  0, 'a' },
+      {"msg",               required_argument,  0, 'm' },
+      {"wait",              required_argument,  0, 'w' },
+      {"broker",            required_argument,  0, 'b' },
+      {"max_retries",       required_argument,  0, 'r' },
 #ifdef WITH_SPAKE2
-      {"secure",      required_argument,  0, 's' },
+      {"secure",            required_argument,  0, 's' },
 #endif
-      {"log-level",   required_argument,  0, 'l' },
-      {"help",        no_argument,        0, 'h' },
+      {"log-level",         required_argument,  0, 'l' },
+      {"help",              no_argument,        0, 'h' },
       {0, 0, 0, 0}
     };
 
-    c = getopt_long(argc, argv, "SRLW:O:E:Ct:a:m:w:b:sl:h", long_options, &option_index);
+    c = getopt_long(argc, argv, "SRLW:O:E:Ct:a:m:w:b:r:sl:h", long_options, &option_index);
     if (c == -1)
       break;
 
@@ -399,6 +397,10 @@ int main(int argc, char* argv[])
         broker_uri = optarg;
         printf("Argument: broker_uri=%s\n", broker_uri);
         break;
+      case 'r':
+        max_retries = atoi(optarg);
+        printf("Argument: Max Connect Retries=%d\n", max_retries);
+        break;
 #ifdef WITH_SPAKE2
       case 's':
         isSecure = 1;
@@ -423,6 +425,8 @@ int main(int argc, char* argv[])
   rtMessage_SetString(config, "appname", "sample_super");
   rtMessage_SetString(config, "uri", broker_uri);
   rtMessage_SetInt32(config, "start_router", 0);
+  if(max_retries != 0)
+    rtMessage_SetInt32(config, "max_retries", max_retries);
 
 #ifdef WITH_SPAKE2
   if(isSecure)
@@ -458,36 +462,45 @@ int main(int argc, char* argv[])
 
   if(sending)
   {
-    int i;
-    for(i = 0; i < numTopics; ++i)
+    while(wait > 0)
     {
-        rtMessage m;
+      int i;
+      for(i = 0; i < numTopics; ++i)
+      {
+          rtMessage m;
+          char buff[200];
+          snprintf(buff, 200, "%s (%d)", message, message_index++);
+          printf("sending on topic %s\n", topics[i]);
+          rtMessage_Create(&m);
+          rtMessage_SetString(m, "msg", buff);
+          err = rtConnection_SendMessage(g_connection, m, topics[i]);
+          rtMessage_Release(m);
+          if(err != RT_OK)
+          {
+            printf("rtConnection_SendMessage failed with error %s trying to send message to topic %s.\n", rtStrError(err), topics[i]);
+          }
+      }
 
-        printf("sending on topic %s\n", topics[i]);
-
-        rtMessage_Create(&m);
-        rtMessage_SetString(m, "msg", message);
-        err = rtConnection_SendMessage(g_connection, m, topics[i]);
-        rtMessage_Release(m);
-        if(err != RT_OK)
-        {
-          printf("rtConnection_SendMessage failed with error %s trying to send message to topic %s. Exiting.\n", rtStrError(err), topics[i]);
-          rtConnection_Destroy(g_connection);
-          exit(0);
-        }
+      printf("waiting %d seconds\n", wait*5);
+      sleep(5);
+      wait--;
     }
   }
   
   if(requesting)
   {
-    int i;
-    for(i = 0; i < numTopics; ++i)
+    while(wait > 0)
     {
+      int i;
+      for(i = 0; i < numTopics; ++i)
+      {
         rtMessage req;
         rtMessage res;
+        char buff[200];
+        snprintf(buff, 200, "%s (%d)", message, message_index++);
         rtMessage_Create(&req);
-        rtMessage_SetString(req, "msg", message);
-        err = rtConnection_SendRequest(g_connection, req, topics[i], &res, 2000);
+        rtMessage_SetString(req, "msg", buff);
+        err = rtConnection_SendRequest(g_connection, req, topics[i], &res, 10000);
         rtMessage_Release(req);
         if (err == RT_OK)
         {
@@ -500,10 +513,12 @@ int main(int argc, char* argv[])
         }
         else
         {
-          printf("rtConnection_SendRequest failed with error %s trying to send message to topic %s. Exiting.\n", rtStrError(err), topics[i]);
-          rtConnection_Destroy(g_connection);
-          exit(0);
+          printf("rtConnection_SendRequest failed with error %s trying to send message to topic %s.\n", rtStrError(err), topics[i]);
         }
+      }
+      printf("waiting %d seconds\n", wait*5);
+      sleep(5);
+      wait--;
     }
   }
 
@@ -556,10 +571,6 @@ int main(int argc, char* argv[])
       printf("waiting %d seconds\n", wait);
       sleep(1);
       wait--;
-      //if(messageReceived)
-      //{
-       // wait = 0;
-      //}
     }
   }
 

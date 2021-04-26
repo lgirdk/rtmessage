@@ -29,6 +29,7 @@
 #include "rtList.h"
 #include "rtRetainable.h"
 #include <wait.h>
+#include <dlfcn.h>
 
 #if defined(__GNUC__)                                                          \
     && ((__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ > 8)))           \
@@ -66,7 +67,18 @@ typedef volatile int atomic_uint_least32_t;
 #define SOL_TCP 6
 #endif
 
+#ifdef WITH_SPAKE2
+#include "secure_wrapper.h"
+#endif
+
 #define DEFAULT_SEND_BUFFER_SIZE 1024
+
+#ifdef  RDKC_BUILD
+#define DEFAULT_MAX_RETRIES -1
+#else
+#define DEFAULT_MAX_RETRIES 3
+#endif
+
 struct _rtListener
 {
   int                     in_use;
@@ -87,6 +99,7 @@ struct _rtConnection
   int                     recv_buffer_capacity;
   atomic_uint_least32_t   sequence_number;
   char*                   application_name;
+  int                     max_retries;
   rtConnectionState       state;
   char                    inbox_name[RTMSG_HEADER_MAX_TOPIC_LENGTH];
   struct _rtListener      listeners[RTMSG_LISTENERS_MAX];
@@ -100,11 +113,20 @@ struct _rtConnection
   pthread_t               callback_thread;
   pthread_mutex_t         callback_message_mutex;
   pthread_cond_t          callback_message_cond;
+  pthread_mutex_t         reconnect_mutex;
+  struct timeval          reader_reconnect_time;
+  struct timeval          sender_reconnect_time;
+  struct timeval          reconnect_time;
+  struct timeval          start_time;
+  int                     reconnect_in_progress;
 #ifdef WITH_SPAKE2
   rtCipher*               cipher;
   uint8_t*                encryption_buffer;
   uint8_t*                decryption_buffer;
+  rtMessage               spakeconfig;
+  int                     check_remote_router;
 #endif
+  pid_t                   read_tid;
 };
 
 typedef struct _rtMessageInfo
@@ -131,7 +153,6 @@ typedef struct _rtCallbackMessage
   rtMessage msg;
 } rtCallbackMessage;
 
-static pid_t g_read_tid;
 static int g_taint_packets = 0; 
 static int rtConnection_StartThreads(rtConnection con);
 static int rtConnection_StopThreads(rtConnection con);
@@ -142,6 +163,7 @@ static inline bool rtConnection_IsSecure(rtConnection con)
 #ifdef WITH_SPAKE2
   return (con->cipher != NULL);
 #else
+  (void)con;
   return false;
 #endif
 }
@@ -228,7 +250,37 @@ rtConnection_ShouldReregister(rtError e)
 }
 
 static rtError
-rtConnection_ConnectAndRegister(rtConnection con)
+rtConnection_EnsureRoutingDaemon()
+{
+  rtLog_Debug("ensure rtrouted running");
+  int ret = system("/usr/bin/rtrouted 2> /dev/null");
+
+  // 127 is return from sh -c (@see system manpage) when command is not found in $PATH
+  if (WEXITSTATUS(ret) == 127)
+  {
+    ret = system("/usr/bin/rtrouted 2> /dev/null");
+  }
+  
+  // exit(12) from rtrouted means another instance is already running
+  if (WEXITSTATUS(ret) == 12)
+  {
+    rtLog_Debug("rtrouted already running");
+    return RT_OK;
+  }
+
+  if (ret != 0)
+  {
+    rtLog_Error("Cannot run rtrouted. Code:%d", ret);
+  }
+  else
+  {
+    rtLog_Debug("rtrouted started");
+  }
+  return RT_OK;
+}
+
+static rtError
+rtConnection_ConnectAndRegister(rtConnection con, struct timeval* reconnect_time)
 {
   int i = 1;
   int ret = 0;
@@ -237,8 +289,71 @@ rtConnection_ConnectAndRegister(rtConnection con)
   uint16_t local_port = 0;
   char remote_addr[128] = {0};
   char local_addr[128] = {0};
-
   socklen_t socket_length;
+  int first_to_handle = false;
+  int is_first_connect = true;
+  int sec, usec;
+  int reconnect_in_progress = 0;
+  double threads_check_time = 0;
+  double last_reconnect_time = 0;
+  double new_reconnect_time = 0;
+
+  if(con->fd != -1)
+    is_first_connect = false;
+
+  if(is_first_connect)
+  {
+    rtLog_Debug("ConnectAndRegister creating first connection");
+    gettimeofday(&con->reconnect_time, NULL);
+  }
+  else
+  {
+    pthread_mutex_lock(&con->reconnect_mutex);
+
+    sec = reconnect_time->tv_sec - con->start_time.tv_sec;
+    usec= reconnect_time->tv_usec - con->start_time.tv_usec;
+    threads_check_time = (double)sec + ((double)usec/1000000.0);
+
+    sec = con->reconnect_time.tv_sec - con->start_time.tv_sec;
+    usec= con->reconnect_time.tv_usec - con->start_time.tv_usec;
+    last_reconnect_time = (double)sec + ((double)usec/1000000.0);
+
+    reconnect_in_progress = con->reconnect_in_progress;
+
+    if(!con->reconnect_in_progress)
+    {
+      if(threads_check_time > last_reconnect_time)
+      {
+        first_to_handle = true;
+        con->reconnect_in_progress = true;
+        gettimeofday(&con->reconnect_time, NULL);
+
+        sec = con->reconnect_time.tv_sec - con->start_time.tv_sec;
+        usec= con->reconnect_time.tv_usec - con->start_time.tv_usec;
+        new_reconnect_time = (double)sec + ((double)usec/1000000.0);
+      }
+    }
+    pthread_mutex_unlock(&con->reconnect_mutex);  
+
+    rtLog_Debug("ConnectAndRegister reconnect state first_to_handle=%d reconnect_in_progress=%d threads_time=%f last_reconnect_time=%f new_reconnect_time=%f", 
+      first_to_handle, reconnect_in_progress, threads_check_time, last_reconnect_time, new_reconnect_time);
+
+    if(!first_to_handle)
+    {
+      if(con->reconnect_in_progress)
+      {
+        rtLog_Debug("ConnectAndRegister waiting for reconnect start");
+        while(con->reconnect_in_progress)
+          usleep(100000);
+        rtLog_Debug("ConnectAndRegister waiting for reconnect end");
+      }
+      else
+      {
+        rtLog_Debug("ConnectAndRegister reconnect previously complete");
+      }
+      return RT_OK;
+    }
+  }
 
   rtSocketStorage_GetLength(&con->remote_endpoint, &socket_length);
 
@@ -264,27 +379,39 @@ rtConnection_ConnectAndRegister(rtConnection con)
   rtSocketStorage_ToString(&con->remote_endpoint, remote_addr, sizeof(remote_addr), &remote_port);
 
   int retry = 0;
-  while (retry <= 3)
+
+  while (retry < con->max_retries || con->max_retries < 0 /*unlimited retries*/)
   {
+    rtLog_Debug("trying connect");
     ret = connect(con->fd, (struct sockaddr *)&con->remote_endpoint, socket_length);
     if (ret == -1)
     {
       int err = errno;
-      if (err == ECONNREFUSED)
+      if (err == ECONNREFUSED || (err == ENOENT && con->remote_endpoint.ss_family == AF_UNIX))
       {
-        sleep(1);
-        retry++;
+        rtLog_Debug("no connection yet. will retry");
       }
       else
       {
-        sleep(1);
-        rtLog_Warn("error connecting to %s:%d. %s", remote_addr, remote_port, strerror(err));
+        rtLog_Warn("unexpected error %s:%d. err:%d=%s. will retry", remote_addr, remote_port, err, strerror(err));
       }
+#if 0
+      rtConnection_EnsureRoutingDaemon();
+#endif
+      sleep(1);
+      retry++;
     }
     else
     {
+      rtLog_Debug("connection made");
       break;
     }
+  }
+
+  if(-1 == ret) {
+    rtLog_Warn("failed to connected after %d attempts", retry);
+    con->reconnect_in_progress = 0;
+    return RT_NO_CONNECTION;
   }
 
   rtSocket_GetLocalEndpoint(con->fd, &con->local_endpoint);
@@ -292,6 +419,14 @@ rtConnection_ConnectAndRegister(rtConnection con)
   rtSocketStorage_ToString(&con->local_endpoint, local_addr, sizeof(local_addr), &local_port);
   rtLog_Debug("connect %s:%d -> %s:%d", local_addr, local_port, remote_addr, remote_port);
 
+  /*first connect return here*/
+  if(is_first_connect)
+  {
+    con->reconnect_in_progress = 0;
+    return RT_OK;
+  }
+
+  /*on reconnect, add back all listeners */
   for (i = 0; i < RTMSG_LISTENERS_MAX; ++i)
   {
     if (con->listeners[i].in_use)
@@ -303,28 +438,37 @@ rtConnection_ConnectAndRegister(rtConnection con)
       rtMessage_SetInt32(m, "route_id", con->listeners[i].subscription_id);
       rtConnection_SendMessage(con, m, "_RTROUTED.INBOX.SUBSCRIBE");
       rtMessage_Release(m);
+
+      /*TODO: we need to readd all the aliases too -- would this allow rbus to recover from broker crash ?*/
     }
   }
 
-  return RT_OK;
-}
+#ifdef WITH_SPAKE2
+  /*on reconnect, rerun key exchange since broker would have lost our key if it restarted */
+  if(con->cipher)
+  {
+     rtLog_Debug("Recreating cipher");
+     rtCipher_Destroy(con->cipher);
+      ret = rtCipher_CreateCipherSpake2Plus(&con->cipher, con->spakeconfig);
+      if(ret != RT_OK)
+      {
+        rtLog_Error("failed to initialize spake2 based cipher");
+        //rtConnection_Destroy(con);
+        con->reconnect_in_progress = 0;
+        return ret;
+      }
 
-static rtError
-rtConnection_EnsureRoutingDaemon()
-{
-  int ret = system("/usr/bin/rtrouted 2> /dev/null");
-
-  // 127 is return from sh -c (@see system manpage) when command is not found in $PATH
-  if (WEXITSTATUS(ret) == 127)
-    ret = system("/usr/bin/rtrouted 2> /dev/null");
-
-  // exit(12) from rtrouted means another instance is already running
-  if (WEXITSTATUS(ret) == 12)
-    return RT_OK;
-
-  if (ret != 0)
-    rtLog_Error("Cannot run rtrouted. Code:%d", ret);
-
+    ret = rtCipher_RunKeyExchangeClient(con->cipher, con);
+    if (ret != RT_OK)
+    {
+      rtLog_Error("failed to do key exchange");
+      //rtConnection_Destroy(con);
+      con->reconnect_in_progress = 0;
+      return ret;
+    }
+  }
+#endif
+  con->reconnect_in_progress = 0;
   return RT_OK;
 }
 
@@ -365,7 +509,7 @@ rtConnection_ReadUntil(rtConnection con, uint8_t* buff, int count, int32_t timeo
       if (errno == EINTR)
         continue;
       rtError e = rtErrorFromErrno(errno);
-      rtLog_Error("failed to read from fd %d. %s", con->fd, rtStrError(e));
+      rtLog_Error("failed to read from fd %d. %s.  errno=%d", con->fd, rtStrError(e), errno);
       return e;
     }
     bytes_read += n;
@@ -375,7 +519,7 @@ rtConnection_ReadUntil(rtConnection con, uint8_t* buff, int count, int32_t timeo
 
 
 static rtError
-rtConnection_CreateInternal(rtConnection* con, char const* application_name, char const* router_config)
+rtConnection_CreateInternal(rtConnection* con, char const* application_name, char const* router_config, int max_retries)
 {
   int i = 0;
   rtError err = RT_OK;
@@ -383,16 +527,13 @@ rtConnection_CreateInternal(rtConnection* con, char const* application_name, cha
   rtConnection c = (rtConnection) malloc(sizeof(struct _rtConnection));
   if (!c)
     return rtErrorFromErrno(ENOMEM);
-#ifdef RDKC_BUILD
-  err = rtConnection_EnsureRoutingDaemon();
-  if (err != RT_OK)
-    return err;
-#endif
+
   pthread_mutexattr_t mutex_attribute;
   pthread_mutexattr_init(&mutex_attribute);
   pthread_mutexattr_settype(&mutex_attribute, PTHREAD_MUTEX_ERRORCHECK);
   if (0 != pthread_mutex_init(&c->mutex, &mutex_attribute) ||
-      0 != pthread_mutex_init(&c->callback_message_mutex, &mutex_attribute))
+      0 != pthread_mutex_init(&c->callback_message_mutex, &mutex_attribute) ||
+      0 != pthread_mutex_init(&c->reconnect_mutex, &mutex_attribute))
   {
     rtLog_Error("Could not initialize mutex. Cannot create connection.");
     free(c);
@@ -415,11 +556,17 @@ rtConnection_CreateInternal(rtConnection* con, char const* application_name, cha
   atomic_init(&(c->sequence_number), 1);
 #endif
   c->application_name = strdup(application_name);
+  c->max_retries = max_retries;
+  /*if user config tries to set 0, we just override with 1, as 0 makes no sense currently*/
+  if(c->max_retries == 0)
+    c->max_retries = 1;
   c->fd = -1;
   rtList_Create(&c->pending_requests_list);
   rtList_Create(&c->callback_message_list);
   c->default_callback = NULL;
   c->run_threads = 0;
+  c->reconnect_in_progress = 0;
+  gettimeofday(&c->start_time, NULL);
 #ifdef WITH_SPAKE2
   c->cipher = NULL;
   c->encryption_buffer = NULL;
@@ -430,7 +577,7 @@ rtConnection_CreateInternal(rtConnection* con, char const* application_name, cha
   memset(&c->remote_endpoint, 0, sizeof(struct sockaddr_storage));
   memset(c->send_buffer, 0, RTMSG_SEND_BUFFER_SIZE);
   memset(c->recv_buffer, 0, RTMSG_SEND_BUFFER_SIZE);
-  snprintf(c->inbox_name, RTMSG_HEADER_MAX_TOPIC_LENGTH, "_%s.INBOX.%d", c->application_name, (int) getpid());
+  snprintf(c->inbox_name, RTMSG_HEADER_MAX_TOPIC_LENGTH, "%s.INBOX.%d", c->application_name, (int) getpid());
   err = rtSocketStorage_FromString(&c->remote_endpoint, router_config);
   if (err != RT_OK)
   {
@@ -438,7 +585,7 @@ rtConnection_CreateInternal(rtConnection* con, char const* application_name, cha
     free(c);
     return err;
   }
-  err = rtConnection_ConnectAndRegister(c);
+  err = rtConnection_ConnectAndRegister(c, 0);
   if (err != RT_OK)
   {
     // TODO: at least log this
@@ -458,7 +605,7 @@ rtConnection_CreateInternal(rtConnection* con, char const* application_name, cha
 rtError
 rtConnection_Create(rtConnection* con, char const* application_name, char const* router_config)
 {
-  return rtConnection_CreateInternal(con, application_name, router_config);
+  return rtConnection_CreateInternal(con, application_name, router_config, DEFAULT_MAX_RETRIES);
 }
 
 rtError
@@ -468,10 +615,14 @@ rtConnection_CreateWithConfig(rtConnection* con, rtMessage const conf)
   char const* application_name = NULL;
   char const* router_config = NULL;
   int start_router = 0;
+  int max_retries = DEFAULT_MAX_RETRIES;
+  int remote_router=0;
 
   rtMessage_GetString(conf, "appname", &application_name);
   rtMessage_GetString(conf, "uri", &router_config);
   rtMessage_GetInt32(conf, "start_router", &start_router);
+  rtMessage_GetInt32(conf, "max_retries", &max_retries);
+  rtMessage_GetInt32(conf, "check_remote_router",&remote_router);
 
   if (start_router)
   {
@@ -480,7 +631,10 @@ rtConnection_CreateWithConfig(rtConnection* con, rtMessage const conf)
       return err;
   }
 
-  err = rtConnection_CreateInternal(con, application_name, router_config);
+  err = rtConnection_CreateInternal(con, application_name, router_config, max_retries);
+  #ifdef WITH_SPAKE2
+  (*con)->check_remote_router=remote_router;
+  #endif
 
 #ifdef WITH_SPAKE2
   if(err == RT_OK)
@@ -492,6 +646,8 @@ rtConnection_CreateWithConfig(rtConnection* con, rtMessage const conf)
     if(spake2_psk)
     {
       rtLog_Info("enabling secure messaging");
+
+      rtMessage_Clone(conf, &(*con)->spakeconfig);
 
       err = rtCipher_CreateCipherSpake2Plus(&(*con)->cipher, conf);
       if(err != RT_OK)
@@ -583,9 +739,9 @@ rtConnection_Destroy(rtConnection con)
     }
 
     pthread_mutex_destroy(&con->mutex);
-
     pthread_mutex_destroy(&con->callback_message_mutex);
     pthread_cond_destroy(&con->callback_message_cond);
+    pthread_mutex_destroy(&con->reconnect_mutex);
 
     free(con);
   }
@@ -601,22 +757,35 @@ rtConnection_SendMessage(rtConnection con, rtMessage msg, char const* topic)
 rtError
 rtConnection_SendMessageDirect(rtConnection con, rtMessage msg, char const* topic, char const* listener)
 {
-  uint8_t* p;
-  uint32_t n;
-  rtError err;
-  uint32_t sequence_number;
-  rtMessage_ToByteArrayWithSize(msg, &p, DEFAULT_SEND_BUFFER_SIZE, &n);  /*FIXME unification is this needed ? rtMessage_FreeByteArray(p);*/
+  gettimeofday(&con->sender_reconnect_time, NULL);
+  while(1)
+  {
+    uint8_t* p;
+    uint32_t n;
+    rtError err;
+    uint32_t sequence_number;
+    rtMessage_ToByteArrayWithSize(msg, &p, DEFAULT_SEND_BUFFER_SIZE, &n);  /*FIXME unification is this needed ? rtMessage_FreeByteArray(p);*/
 
-  pthread_mutex_lock(&con->mutex);
+    pthread_mutex_lock(&con->mutex);
 #ifdef C11_ATOMICS_SUPPORTED
-  sequence_number = atomic_fetch_add_explicit(&con->sequence_number, 1, memory_order_relaxed);
+    sequence_number = atomic_fetch_add_explicit(&con->sequence_number, 1, memory_order_relaxed);
 #else
-  sequence_number = __sync_fetch_and_add(&con->sequence_number, 1);
+    sequence_number = __sync_fetch_and_add(&con->sequence_number, 1);
 #endif
-  err = rtConnection_SendInternal(con, p, n, topic, listener, 0, sequence_number);
-  pthread_mutex_unlock(&con->mutex);
-  rtMessage_FreeByteArray(p);
-  return err;
+    err = rtConnection_SendInternal(con, p, n, topic, listener, 0, sequence_number);
+    pthread_mutex_unlock(&con->mutex);
+    rtMessage_FreeByteArray(p);
+
+    if(err == RT_NO_CONNECTION)
+    {
+      err = rtConnection_ConnectAndRegister(con, &con->sender_reconnect_time);
+      if(err != RT_OK)
+        return err;
+      else
+        continue;
+    }
+    return err;
+  }
 }
 
 rtError
@@ -641,17 +810,32 @@ rtConnection_SendRequest(rtConnection con, rtMessage const req, char const* topi
 rtError
 rtConnection_SendResponse(rtConnection con, rtMessageHeader const* request_hdr, rtMessage const res, int32_t timeout)
 {
-  (void)timeout;
-  rtError err;
-  uint8_t* p;
-  uint32_t n;
+  gettimeofday(&con->sender_reconnect_time, NULL);
+  while(1)
+  {
+    (void)timeout;
+    rtError err;
+    uint8_t* p;
+    uint32_t n;
 
-  rtMessage_ToByteArrayWithSize(res, &p, DEFAULT_SEND_BUFFER_SIZE, &n);
-  pthread_mutex_lock(&con->mutex);
-  err = rtConnection_SendInternal(con, p, n, request_hdr->reply_topic, request_hdr->topic, rtMessageFlags_Response, request_hdr->sequence_number);
-  pthread_mutex_unlock(&con->mutex);
-  rtMessage_FreeByteArray(p);
-  return err;
+    rtMessage_ToByteArrayWithSize(res, &p, DEFAULT_SEND_BUFFER_SIZE, &n);
+    pthread_mutex_lock(&con->mutex);
+  //TODO: should we send response on reconnect ?
+    err = rtConnection_SendInternal(con, p, n, request_hdr->reply_topic, request_hdr->topic, rtMessageFlags_Response, request_hdr->sequence_number);
+    pthread_mutex_unlock(&con->mutex);
+    rtMessage_FreeByteArray(p);
+
+    if(err == RT_NO_CONNECTION)
+    {
+      err = rtConnection_ConnectAndRegister(con, &con->sender_reconnect_time);
+      if(err != RT_OK)
+        return err;
+      else
+        continue;
+    }
+
+    return err;
+  }
 }
 
 rtError
@@ -664,20 +848,33 @@ rtError
 rtConnection_SendBinaryDirect(rtConnection con, uint8_t const* p, uint32_t n, char const* topic,
   char const* listener)
 {
-  rtError err;
-  uint32_t sequence_number;
+  gettimeofday(&con->sender_reconnect_time, NULL);
+  while(1)
+  {
+    rtError err;
+    uint32_t sequence_number;
 
 #ifdef C11_ATOMICS_SUPPORTED
-  sequence_number = atomic_fetch_add_explicit(&con->sequence_number, 1, memory_order_relaxed);
+    sequence_number = atomic_fetch_add_explicit(&con->sequence_number, 1, memory_order_relaxed);
 #else
-  sequence_number = __sync_fetch_and_add(&con->sequence_number, 1);
+    sequence_number = __sync_fetch_and_add(&con->sequence_number, 1);
 #endif
 
+    pthread_mutex_lock(&con->mutex);
+    err = rtConnection_SendInternal(con, p, n, topic, listener, rtMessageFlags_RawBinary, sequence_number);
+    pthread_mutex_unlock(&con->mutex);
 
-  pthread_mutex_lock(&con->mutex);
-  err = rtConnection_SendInternal(con, p, n, topic, listener, rtMessageFlags_RawBinary, sequence_number);
-  pthread_mutex_unlock(&con->mutex);
-  return err;
+    if(err == RT_NO_CONNECTION)
+    {
+      err = rtConnection_ConnectAndRegister(con, &con->sender_reconnect_time);
+      if(err != RT_OK)
+        return err;
+      else
+        continue;
+    }
+
+    return err;
+  }
 }
 
 rtError
@@ -727,138 +924,156 @@ rtError
 rtConnection_SendRequestInternal(rtConnection con, uint8_t const* pReq, uint32_t nReq, char const* topic,
   rtMessageInfo** res, int32_t timeout, int flags)
 {
-  rtError ret = RT_OK;
-  uint8_t const* p = pReq;
-  uint32_t n = nReq;
-  rtError err;
-  struct timespec until;
-  int wait_result;
-  uint32_t sequence_number;
-  rtListItem listItem;
+  gettimeofday(&con->sender_reconnect_time, NULL);
+  while(1)
+  {
+    rtError ret = RT_OK;
+    uint8_t const* p = pReq;
+    uint32_t n = nReq;
+    rtError err;
+    struct timespec until;
+    int wait_result;
+    uint32_t sequence_number;
+    rtListItem listItem;
 
-  pid_t tid = syscall(__NR_gettid);
+    pid_t tid = syscall(__NR_gettid);
 
-  pthread_mutex_lock(&con->mutex);
+    pthread_mutex_lock(&con->mutex);
 #ifdef C11_ATOMICS_SUPPORTED
-  sequence_number = atomic_fetch_add_explicit(&con->sequence_number, 1, memory_order_relaxed);
+    sequence_number = atomic_fetch_add_explicit(&con->sequence_number, 1, memory_order_relaxed);
 #else
-  sequence_number = __sync_fetch_and_add(&con->sequence_number, 1);
+    sequence_number = __sync_fetch_and_add(&con->sequence_number, 1);
 #endif
-  /*Populate the pending request and enqueue it.*/
-  pending_request queue_entry; 
-  queue_entry.sequence_number = sequence_number;
-  sem_init(&queue_entry.sem, 0, 0);
-  queue_entry.response = NULL;
+    /*Populate the pending request and enqueue it.*/
+    pending_request queue_entry;
+    queue_entry.sequence_number = sequence_number;
+    sem_init(&queue_entry.sem, 0, 0);
+    queue_entry.response = NULL;
 
-  rtList_PushFront(con->pending_requests_list, (void*)&queue_entry, &listItem);
-  err = rtConnection_SendInternal(con, p, n, topic, con->inbox_name, rtMessageFlags_Request | flags, sequence_number);
-  if (err != RT_OK)
-  {
-    ret = err;
-    goto dequeue_and_return;
-  }
-  pthread_mutex_unlock(&con->mutex);
-
-  if(tid != g_read_tid)
-  {
-
-    clock_gettime(CLOCK_REALTIME, &until);
-    until.tv_sec += timeout / 1000;
-    until.tv_nsec += ((long)timeout % 1000L) * 1000000L;
-    if(1000000000L < until.tv_nsec)
+    rtList_PushFront(con->pending_requests_list, (void*)&queue_entry, &listItem);
+    err = rtConnection_SendInternal(con, p, n, topic, con->inbox_name, rtMessageFlags_Request | flags, sequence_number);
+    if (err != RT_OK)
     {
-      until.tv_sec += 1;
-      until.tv_nsec -= 1000000000L;
+      ret = err;
+      goto dequeue_and_continue;
     }
-    wait_result = sem_timedwait(&queue_entry.sem, &until); //TODO: handle wake triggered by signals
-  }
-  else
-  {
-    //Handle nested dispatching.
-    struct timeval start_time, end_time, diff;
-    gettimeofday(&start_time, NULL);
-    do
+    pthread_mutex_unlock(&con->mutex);
+
+    if(tid != con->read_tid)
     {
-      if((err = rtConnection_Read(con, timeout)) == RT_OK)
+
+      clock_gettime(CLOCK_REALTIME, &until);
+      until.tv_sec += timeout / 1000;
+      until.tv_nsec += ((long)timeout % 1000L) * 1000000L;
+      if(1000000000L < until.tv_nsec)
       {
-        int sem_value = 0;
-        sem_getvalue(&queue_entry.sem, &sem_value);
-        if(0 < sem_value)
+        until.tv_sec += 1;
+        until.tv_nsec -= 1000000000L;
+      }
+      wait_result = sem_timedwait(&queue_entry.sem, &until); //TODO: handle wake triggered by signals
+    }
+    else
+    {
+      //Handle nested dispatching.
+      struct timeval start_time, end_time, diff;
+      gettimeofday(&start_time, NULL);
+      do
+      {
+        if((err = rtConnection_Read(con, timeout)) == RT_OK)
         {
-          wait_result = 0;
-          break;
-        }
-        else
-        {
-          //It's a response to a different message. Adjust the timeout value and try again.
-          gettimeofday(&end_time, NULL);
-          timersub(&end_time, &start_time, &diff);
-          long long diff_ms = (diff.tv_sec * 1000ll + (long long)(diff.tv_usec / 1000ll));
-          if((long long)timeout <= diff_ms)
+          int sem_value = 0;
+          sem_getvalue(&queue_entry.sem, &sem_value);
+          if(0 < sem_value)
           {
-            wait_result = 1;
-            errno = ETIMEDOUT;
+            wait_result = 0;
             break;
           }
           else
           {
-            timeout -= (int32_t)diff_ms;
-            //rtLog_Info("Retry nested call with timeout of %d ms", timeout);
+            //It's a response to a different message. Adjust the timeout value and try again.
+            gettimeofday(&end_time, NULL);
+            timersub(&end_time, &start_time, &diff);
+            long long diff_ms = (diff.tv_sec * 1000ll + (long long)(diff.tv_usec / 1000ll));
+            if((long long)timeout <= diff_ms)
+            {
+              wait_result = 1;
+              errno = ETIMEDOUT;
+              break;
+            }
+            else
+            {
+              timeout -= (int32_t)diff_ms;
+              //rtLog_Info("Retry nested call with timeout of %d ms", timeout);
+            }
           }
+        }
+        else if(err == RT_NO_CONNECTION)
+        {
+          ret = err;
+          goto dequeue_and_continue;
+        }
+        else
+        {
+          rtLog_Error("Nested read failed.");
+          wait_result = 1;
+          break;
+        }
+      } while(RT_OK == err);
+    }
+    if(0 == wait_result)
+    {
+      /*Sem posted*/
+      pthread_mutex_lock(&con->mutex);
+
+      if(queue_entry.response)
+      {
+        if(queue_entry.response->header.flags & rtMessageFlags_Undeliverable)
+        {
+          rtMessageInfo_Release(queue_entry.response);
+
+          ret = RT_OBJECT_NO_LONGER_AVAILABLE;
+        }
+        else
+        {
+          /*caller must call rtMessageInfo_Release on the response*/
+
+          *res = queue_entry.response; 
         }
       }
       else
       {
-        rtLog_Error("Nested read failed.");
-        wait_result = 1;
-        break;
+        /*For some reason, we unblocked, but there's no data.*/
+        ret = RT_ERROR;
       }
-    } while(RT_OK == err);
-    
-  }
-  if(0 == wait_result)
-  {
-    /*Sem posted*/
-    pthread_mutex_lock(&con->mutex);
-
-    if(queue_entry.response)
+    }
+    else
     {
-      if(queue_entry.response->header.flags & rtMessageFlags_Undeliverable)
-      {
-        rtMessageInfo_Release(queue_entry.response);
-
-        ret = RT_OBJECT_NO_LONGER_AVAILABLE;
-      }
+      /*Wait failed. Was this a timeout?*/
+      if(ETIMEDOUT == errno)
+        ret = RT_ERROR_TIMEOUT;
       else
-      {
-        /*caller must call rtMessageInfo_Release on the response*/
-
-        *res = queue_entry.response; 
-      }      
+        ret = RT_ERROR;
     }
-    else
+
+dequeue_and_continue:
+    rtList_RemoveItem(con->pending_requests_list, listItem, NULL);
+    pthread_mutex_unlock(&con->mutex);
+    sem_destroy(&queue_entry.sem);
+
+    if(ret == RT_NO_CONNECTION)
     {
-      /*For some reason, we unblocked, but there's no data.*/
-      ret = RT_ERROR;
+      ret = rtConnection_ConnectAndRegister(con, &con->sender_reconnect_time);
+      if(ret == RT_OK)
+        continue;
     }
-  }
-  else
-  {
-    /*Wait failed. Was this a timeout?*/
-    if(ETIMEDOUT == errno)
-      ret = RT_ERROR_TIMEOUT;
-    else
-      ret = RT_ERROR;
-  }
 
-dequeue_and_return:
-  rtList_RemoveItem(con->pending_requests_list, listItem, NULL);
-  pthread_mutex_unlock(&con->mutex);
-  sem_destroy(&queue_entry.sem);
+    if(ret == RT_ERROR_TIMEOUT)
+    {
+      rtLog_Info("rtConnection_SendRequest TIMEOUT");
+    }
 
-  if(ret == RT_ERROR_TIMEOUT)
-    rtLog_Info("rtConnection_SendRequest TIMEOUT");
-  return ret;
+    return ret;
+  }
 }
 
 rtError
@@ -877,7 +1092,7 @@ rtConnection_SendInternal(rtConnection con, uint8_t const* buff, uint32_t n, cha
   /*encrypte all non-internal messages*/
   if (rtConnection_IsSecure(con) && topic[0] != '_')
   { 
-    rtLog_Debug("encryping message");
+    rtLog_Debug("encrypting message");
 
     if ((err = rtCipher_Encrypt(con->cipher, buff, n, con->encryption_buffer, RTMSG_SEND_BUFFER_SIZE, &message_length)) != RT_OK)
     {
@@ -946,11 +1161,8 @@ rtConnection_SendInternal(rtConnection con, uint8_t const* buff, uint32_t n, cha
 
     if (err != RT_OK && rtConnection_ShouldReregister(err))
     {
-#ifdef RDKC_BUILD
-      err = rtConnection_EnsureRoutingDaemon();
-      if (err == RT_OK)
-#endif
-      err = rtConnection_ConnectAndRegister(con);
+      con->send_buffer_in_use=0;
+      return RT_NO_CONNECTION;
     }
   }
   while ((err != RT_OK) && (num_attempts++ < max_attempts));
@@ -1204,6 +1416,8 @@ rtConnection_Read(rtConnection con, int32_t timeout)
           {
             uint32_t decryptedLength;
 
+            rtLog_Debug("decrypting message");
+
             err = rtCipher_Decrypt(con->cipher, msginfo->data, msginfo->dataLength, con->decryption_buffer, RTMSG_SEND_BUFFER_SIZE, &decryptedLength);
 
             if (err != RT_OK)
@@ -1228,7 +1442,8 @@ rtConnection_Read(rtConnection con, int32_t timeout)
 
     if (err != RT_OK && rtConnection_ShouldReregister(err))
     {
-        err = rtConnection_ConnectAndRegister(con);
+        rtMessageInfo_Release(msginfo);
+        return RT_NO_CONNECTION;
     }
   }
   while ((err != RT_OK) && (num_attempts++ < max_attempts));
@@ -1296,6 +1511,45 @@ rtConnection_Read(rtConnection con, int32_t timeout)
 
   return RT_OK;
 }
+
+#ifdef WITH_SPAKE2
+void check_router(rtConnection con)
+{
+  rtError err;
+  char remote_addr[128] = {0};
+  uint16_t remote_port = 0;
+  int x;
+  void *handle;
+  char *error;
+  int (*fptr)(const char *format, ...);
+
+  rtSocketStorage_ToString(&con->remote_endpoint, remote_addr, sizeof(remote_addr), &remote_port);
+  rtLog_Info("remote addr is %s \n",remote_addr);
+  if(remote_addr != NULL)
+  {
+    handle = dlopen ("/usr/lib/libsecure_wrapper.so", RTLD_LAZY);
+    if (!handle) 
+    {
+      fputs (dlerror(), stderr);
+      exit(1);
+    }
+    fptr = dlsym(handle, "v_secure_system");
+    error = dlerror();
+    if (error != NULL) 
+    {
+      printf( "!!! %s\n", error );
+      return;
+    }
+    x=(*fptr)("ping -c 1 %s > /dev/null",remote_addr);
+    if(x != 0)
+    {
+      rtLog_Info("reconnecting from reader thread \n");
+      err = rtConnection_ConnectAndRegister(con, &con->reader_reconnect_time);
+    }
+    dlclose(handle);
+   }
+}
+#endif
 
 /*
   RDKB-26837: added rtConnection_CallbackThread to decouple
@@ -1407,11 +1661,16 @@ static void * rtConnection_ReaderThread(void *data)
 {
   rtError err = RT_OK;
   rtConnection con = (rtConnection)data;
-  g_read_tid = syscall(__NR_gettid);
+  con->read_tid = syscall(__NR_gettid);
   rtLog_Debug("Reader thread started");
   while(1 == con->run_threads)
   {
+    gettimeofday(&con->reader_reconnect_time, NULL);
+    #ifdef WITH_SPAKE2
+    if((err = rtConnection_Read(con, 60000)) != RT_OK)
+    #else
     if((err = rtConnection_Read(con, -1)) != RT_OK)
+    #endif
     {
       pthread_mutex_lock(&con->mutex);
       if(0 == con->run_threads)
@@ -1421,8 +1680,40 @@ static void * rtConnection_ReaderThread(void *data)
       }
       else
         pthread_mutex_unlock(&con->mutex);
+      #ifdef WITH_SPAKE2
+      rtLog_Debug("Reader failed with error 0x%x.", err);
+      #else
       rtLog_Error("Reader failed with error 0x%x.", err);
-      sleep(5); //Avoid tight loops if we have an unrecoverable situation.
+      #endif
+      if(err == RT_NO_CONNECTION)
+      {
+        /*
+         rtConnection_ConnectAndRegister is also called from all the send api functions,
+         and if it fails to connect in those functions, they simply return error to the caller.
+         However, here in the Reader thread, we are forced to just keep retrying indefinitely.
+         On rdkc its fine because they want unlimited retries anyways.
+         On rdkb if rtrouted crashes rbus is hosed irregardless of reconnect.
+         need to check rdkv
+        */
+        while(1 == con->run_threads)
+        {
+            err = rtConnection_ConnectAndRegister(con, &con->reader_reconnect_time);
+            if(err == RT_OK || con->run_threads != 1)
+                break;
+            sleep(5);
+            gettimeofday(&con->reader_reconnect_time, NULL);//set this time to take ownership of reconnect
+        }
+      }
+      else
+      {
+        sleep(5); //Avoid tight loops if we have an unrecoverable situation.
+      }
+      #ifdef WITH_SPAKE2
+      if(con->check_remote_router==1)
+      {
+       check_router(con);
+      }
+      #endif
     }
   }
   rtLog_Debug("Reader thread exiting");
