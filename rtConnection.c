@@ -647,7 +647,9 @@ rtConnection_SendResponse(rtConnection con, rtMessageHeader const* request_hdr, 
   uint32_t n;
 
   rtMessage_ToByteArrayWithSize(res, &p, DEFAULT_SEND_BUFFER_SIZE, &n);
+  pthread_mutex_lock(&con->mutex);
   err = rtConnection_SendInternal(con, p, n, request_hdr->reply_topic, request_hdr->topic, rtMessageFlags_Response, request_hdr->sequence_number);
+  pthread_mutex_unlock(&con->mutex);
   rtMessage_FreeByteArray(p);
   return err;
 }
@@ -713,9 +715,12 @@ rtConnection_SendBinaryResponse(rtConnection con, rtMessageHeader const* request
   int32_t timeout)
 {
   (void) timeout;
-
-  return rtConnection_SendInternal(con, p, n, request_hdr->reply_topic, request_hdr->topic, 
+  rtError err;
+  pthread_mutex_lock(&con->mutex);
+  err = rtConnection_SendInternal(con, p, n, request_hdr->reply_topic, request_hdr->topic,
     rtMessageFlags_Response|rtMessageFlags_RawBinary, request_hdr->sequence_number);
+  pthread_mutex_unlock(&con->mutex);
+  return err;
 }
 
 rtError
