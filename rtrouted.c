@@ -52,6 +52,10 @@
 #include "local_benchmarking.h"
 #include <cJSON.h>
 
+#ifdef ENABLE_RDKLOGGER
+#include "rdk_debug.h"
+#endif
+
 #ifdef INCLUDE_BREAKPAD
 #ifdef RDKC_BUILD
 #include "breakpadwrap.h"
@@ -1609,6 +1613,10 @@ int main(int argc, char* argv[])
     rtLog_Warn("another instance of rtrouted is already running");
     exit(12);
   }
+
+#ifdef ENABLE_RDKLOGGER
+    rdk_logger_init("/etc/debug.ini");
+#endif
 
   rtLogSetLogHandler(NULL);
 
