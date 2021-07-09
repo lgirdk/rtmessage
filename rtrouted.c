@@ -490,7 +490,11 @@ rtRouted_SendMessage(rtMessageHeader * request_hdr, rtMessage message, rtConnect
   }
   if(!found_dest)
   {
-    rtLog_Error("Could not find route to destination.");
+    if(strcmp(request_hdr->topic, "_RTROUTED.ADVISORY"))
+    {
+        ret = RT_FAIL;
+        rtLog_Warn("Could not find route to destination. Topic=%s ", request_hdr->topic);
+    }
   }
   rtMessage_FreeByteArray(buffer);
   return ret;
@@ -759,7 +763,7 @@ rtRouted_OnMessageDiscoverRegisteredComponents(rtConnectedClient* sender, rtMess
       rtMessageHeader new_header;
       prep_reply_header_from_request(&new_header, hdr);
       if(RT_OK != rtRouted_SendMessage(&new_header, response, NULL))
-          rtLog_Info("Response couldn't be sent.");
+          rtLog_Info("%s() Response couldn't be sent.", __func__);
       rtMessage_Release(response);
   }
   else
@@ -817,7 +821,7 @@ rtRouted_OnMessageDiscoverWildcardDestinations(rtConnectedClient* sender, rtMess
     rtMessageHeader new_header;
     prep_reply_header_from_request(&new_header, hdr);
     if(RT_OK != rtRouted_SendMessage(&new_header, response, NULL))
-      rtLog_Info("Response couldn't be sent.");
+      rtLog_Info("%s() Response couldn't be sent.", __func__);
     rtMessage_Release(response);
   }
   else
@@ -890,7 +894,7 @@ rtRouted_OnMessageDiscoverObjectElements(rtConnectedClient* sender, rtMessageHea
       rtMessageHeader new_header;
       prep_reply_header_from_request(&new_header, hdr);
       if (RT_OK != rtRouted_SendMessage(&new_header, response, NULL))
-        rtLog_Info("Response couldn't be sent.");
+        rtLog_Info("%s() Response couldn't be sent.", __func__);
       rtMessage_Release(response);   
     }
   }
