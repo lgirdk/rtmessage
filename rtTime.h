@@ -21,13 +21,13 @@
 #ifndef __RT_TIME_H__
 #define __RT_TIME_H__
 
-#include <sys/time.h>
+#include <time.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef struct timeval rtTime_t;
+typedef struct timespec rtTime_t;
 typedef struct timespec rtTimespec_t;
 
 /** @fn void rtTime_Now (rtTime_t* t)

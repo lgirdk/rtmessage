@@ -28,6 +28,8 @@
 #include "rtSocket.h"
 #include "rtList.h"
 #include "rtRetainable.h"
+#include "rtTime.h"
+#include "rtSemaphore.h"
 #include <wait.h>
 #include <dlfcn.h>
 
@@ -54,9 +56,6 @@ typedef volatile int atomic_uint_least32_t;
 #include <time.h>
 #include <unistd.h>
 #include <pthread.h>
-#include <semaphore.h>
-#include <errno.h>
-#include <time.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <sys/time.h>
@@ -114,10 +113,10 @@ struct _rtConnection
   pthread_mutex_t         callback_message_mutex;
   pthread_cond_t          callback_message_cond;
   pthread_mutex_t         reconnect_mutex;
-  struct timeval          reader_reconnect_time;
-  struct timeval          sender_reconnect_time;
-  struct timeval          reconnect_time;
-  struct timeval          start_time;
+  rtTime_t                reader_reconnect_time;
+  rtTime_t                sender_reconnect_time;
+  rtTime_t                reconnect_time;
+  rtTime_t                start_time;
   int                     reconnect_in_progress;
 #ifdef WITH_SPAKE2
   rtCipher*               cipher;
@@ -143,7 +142,7 @@ typedef struct _rtMessageInfo
 typedef struct 
 {
   uint32_t sequence_number;
-  sem_t sem;
+  rtSemaphore sem;
   rtMessageInfo* response;
 }pending_request;
 
@@ -280,7 +279,7 @@ rtConnection_EnsureRoutingDaemon()
 }
 
 static rtError
-rtConnection_ConnectAndRegister(rtConnection con, struct timeval* reconnect_time)
+rtConnection_ConnectAndRegister(rtConnection con, rtTime_t* reconnect_time)
 {
   int i = 1;
   int ret = 0;
@@ -292,11 +291,11 @@ rtConnection_ConnectAndRegister(rtConnection con, struct timeval* reconnect_time
   socklen_t socket_length;
   int first_to_handle = false;
   int is_first_connect = true;
-  int sec, usec;
   int reconnect_in_progress = 0;
-  double threads_check_time = 0;
-  double last_reconnect_time = 0;
-  double new_reconnect_time = 0;
+  rtTime_t last_reconnect_time = con->reconnect_time;
+  char tbuff1[100];
+  char tbuff2[100];
+  char tbuff3[100];
 
   if(con->fd != -1)
     is_first_connect = false;
@@ -304,39 +303,30 @@ rtConnection_ConnectAndRegister(rtConnection con, struct timeval* reconnect_time
   if(is_first_connect)
   {
     rtLog_Debug("ConnectAndRegister creating first connection");
-    gettimeofday(&con->reconnect_time, NULL);
+    rtTime_Now(&con->reconnect_time);
   }
   else
   {
     pthread_mutex_lock(&con->reconnect_mutex);
 
-    sec = reconnect_time->tv_sec - con->start_time.tv_sec;
-    usec= reconnect_time->tv_usec - con->start_time.tv_usec;
-    threads_check_time = (double)sec + ((double)usec/1000000.0);
-
-    sec = con->reconnect_time.tv_sec - con->start_time.tv_sec;
-    usec= con->reconnect_time.tv_usec - con->start_time.tv_usec;
-    last_reconnect_time = (double)sec + ((double)usec/1000000.0);
-
     reconnect_in_progress = con->reconnect_in_progress;
 
     if(!con->reconnect_in_progress)
     {
-      if(threads_check_time > last_reconnect_time)
+      if(rtTime_Compare(reconnect_time, &con->reconnect_time) > 0)
       {
         first_to_handle = true;
         con->reconnect_in_progress = true;
-        gettimeofday(&con->reconnect_time, NULL);
-
-        sec = con->reconnect_time.tv_sec - con->start_time.tv_sec;
-        usec= con->reconnect_time.tv_usec - con->start_time.tv_usec;
-        new_reconnect_time = (double)sec + ((double)usec/1000000.0);
+        rtTime_Now(&con->reconnect_time);
       }
     }
     pthread_mutex_unlock(&con->reconnect_mutex);  
 
-    rtLog_Debug("ConnectAndRegister reconnect state first_to_handle=%d reconnect_in_progress=%d threads_time=%f last_reconnect_time=%f new_reconnect_time=%f", 
-      first_to_handle, reconnect_in_progress, threads_check_time, last_reconnect_time, new_reconnect_time);
+    rtLog_Debug("ConnectAndRegister reconnect state first_to_handle=%d reconnect_in_progress=%d threads_time=[%s] last_reconnect_time=[%s] new_reconnect_time=[%s]", 
+      first_to_handle, reconnect_in_progress, 
+      rtTime_ToString(&con->start_time, tbuff1), 
+      rtTime_ToString(&last_reconnect_time, tbuff2),
+      rtTime_ToString(&con->reconnect_time, tbuff3));
 
     if(!first_to_handle)
     {
@@ -565,8 +555,9 @@ rtConnection_CreateInternal(rtConnection* con, char const* application_name, cha
   rtList_Create(&c->callback_message_list);
   c->default_callback = NULL;
   c->run_threads = 0;
+  c->read_tid = 0;
   c->reconnect_in_progress = 0;
-  gettimeofday(&c->start_time, NULL);
+  rtTime_Now(&c->start_time);
 #ifdef WITH_SPAKE2
   c->cipher = NULL;
   c->encryption_buffer = NULL;
@@ -726,7 +717,7 @@ rtConnection_Destroy(rtConnection con)
       rtListItem_GetData(listItem, (void**)&entry);
 
       found_pending_requests = 1;
-      sem_post(&entry->sem);
+      rtSemaphore_Post(entry->sem);
     }
     rtList_Destroy(con->pending_requests_list,NULL);
     rtList_Destroy(con->callback_message_list, rtMessageInfo_ListItemFree);
@@ -757,7 +748,7 @@ rtConnection_SendMessage(rtConnection con, rtMessage msg, char const* topic)
 rtError
 rtConnection_SendMessageDirect(rtConnection con, rtMessage msg, char const* topic, char const* listener)
 {
-  gettimeofday(&con->sender_reconnect_time, NULL);
+  rtTime_Now(&con->sender_reconnect_time);
   while(1)
   {
     uint8_t* p;
@@ -810,7 +801,7 @@ rtConnection_SendRequest(rtConnection con, rtMessage const req, char const* topi
 rtError
 rtConnection_SendResponse(rtConnection con, rtMessageHeader const* request_hdr, rtMessage const res, int32_t timeout)
 {
-  gettimeofday(&con->sender_reconnect_time, NULL);
+  rtTime_Now(&con->sender_reconnect_time);
   while(1)
   {
     (void)timeout;
@@ -848,7 +839,7 @@ rtError
 rtConnection_SendBinaryDirect(rtConnection con, uint8_t const* p, uint32_t n, char const* topic,
   char const* listener)
 {
-  gettimeofday(&con->sender_reconnect_time, NULL);
+  rtTime_Now(&con->sender_reconnect_time);
   while(1)
   {
     rtError err;
@@ -924,15 +915,13 @@ rtError
 rtConnection_SendRequestInternal(rtConnection con, uint8_t const* pReq, uint32_t nReq, char const* topic,
   rtMessageInfo** res, int32_t timeout, int flags)
 {
-  gettimeofday(&con->sender_reconnect_time, NULL);
+  rtTime_Now(&con->sender_reconnect_time);
   while(1)
   {
     rtError ret = RT_OK;
     uint8_t const* p = pReq;
     uint32_t n = nReq;
     rtError err;
-    struct timespec until;
-    int wait_result;
     uint32_t sequence_number;
     rtListItem listItem;
 
@@ -947,7 +936,7 @@ rtConnection_SendRequestInternal(rtConnection con, uint8_t const* pReq, uint32_t
     /*Populate the pending request and enqueue it.*/
     pending_request queue_entry;
     queue_entry.sequence_number = sequence_number;
-    sem_init(&queue_entry.sem, 0, 0);
+    rtSemaphore_Create(&queue_entry.sem);
     queue_entry.response = NULL;
 
     rtList_PushFront(con->pending_requests_list, (void*)&queue_entry, &listItem);
@@ -961,48 +950,38 @@ rtConnection_SendRequestInternal(rtConnection con, uint8_t const* pReq, uint32_t
 
     if(tid != con->read_tid)
     {
-
-      clock_gettime(CLOCK_REALTIME, &until);
-      until.tv_sec += timeout / 1000;
-      until.tv_nsec += ((long)timeout % 1000L) * 1000000L;
-      if(1000000000L < until.tv_nsec)
-      {
-        until.tv_sec += 1;
-        until.tv_nsec -= 1000000000L;
-      }
-      wait_result = sem_timedwait(&queue_entry.sem, &until); //TODO: handle wake triggered by signals
+      rtTime_t timeout_time;
+      rtTime_Later(NULL, timeout, &timeout_time);
+      ret = rtSemaphore_TimedWait(queue_entry.sem, &timeout_time); //TODO: handle wake triggered by signals
     }
     else
     {
       //Handle nested dispatching.
-      struct timeval start_time, end_time, diff;
-      gettimeofday(&start_time, NULL);
+      rtTime_t start_time;
+      rtTime_Now(&start_time);
       do
       {
         if((err = rtConnection_Read(con, timeout)) == RT_OK)
         {
           int sem_value = 0;
-          sem_getvalue(&queue_entry.sem, &sem_value);
+          rtSemaphore_GetValue(queue_entry.sem, &sem_value);
           if(0 < sem_value)
           {
-            wait_result = 0;
+            ret = RT_OK;
             break;
           }
           else
           {
             //It's a response to a different message. Adjust the timeout value and try again.
-            gettimeofday(&end_time, NULL);
-            timersub(&end_time, &start_time, &diff);
-            long long diff_ms = (diff.tv_sec * 1000ll + (long long)(diff.tv_usec / 1000ll));
-            if((long long)timeout <= diff_ms)
+            int diff_ms = rtTime_Elapsed(&start_time, NULL);
+            if(timeout <= diff_ms)
             {
-              wait_result = 1;
-              errno = ETIMEDOUT;
+              ret = RT_ERROR_TIMEOUT;
               break;
             }
             else
             {
-              timeout -= (int32_t)diff_ms;
+              timeout -= diff_ms;
               //rtLog_Info("Retry nested call with timeout of %d ms", timeout);
             }
           }
@@ -1015,12 +994,12 @@ rtConnection_SendRequestInternal(rtConnection con, uint8_t const* pReq, uint32_t
         else
         {
           rtLog_Error("Nested read failed.");
-          wait_result = 1;
+          ret = RT_ERROR;
           break;
         }
       } while(RT_OK == err);
     }
-    if(0 == wait_result)
+    if(RT_OK == ret)
     {
       /*Sem posted*/
       pthread_mutex_lock(&con->mutex);
@@ -1046,19 +1025,11 @@ rtConnection_SendRequestInternal(rtConnection con, uint8_t const* pReq, uint32_t
         ret = RT_ERROR;
       }
     }
-    else
-    {
-      /*Wait failed. Was this a timeout?*/
-      if(ETIMEDOUT == errno)
-        ret = RT_ERROR_TIMEOUT;
-      else
-        ret = RT_ERROR;
-    }
 
 dequeue_and_continue:
     rtList_RemoveItem(con->pending_requests_list, listItem, NULL);
     pthread_mutex_unlock(&con->mutex);
-    sem_destroy(&queue_entry.sem);
+    rtSemaphore_Destroy(queue_entry.sem);
 
     if(ret == RT_NO_CONNECTION)
     {
@@ -1469,7 +1440,7 @@ rtConnection_Read(rtConnection con, int32_t timeout)
         {
           entry->response = msginfo;
           msginfo = NULL; /*rtConnection_SendRequest thread will release it*/
-          sem_post(&(entry->sem));
+          rtSemaphore_Post(entry->sem);
           break;
         }
       }
@@ -1665,7 +1636,7 @@ static void * rtConnection_ReaderThread(void *data)
   rtLog_Debug("Reader thread started");
   while(1 == con->run_threads)
   {
-    gettimeofday(&con->reader_reconnect_time, NULL);
+    rtTime_Now(&con->reader_reconnect_time);
     #ifdef WITH_SPAKE2
     if((err = rtConnection_Read(con, 60000)) != RT_OK)
     #else
@@ -1701,7 +1672,7 @@ static void * rtConnection_ReaderThread(void *data)
             if(err == RT_OK || con->run_threads != 1)
                 break;
             sleep(5);
-            gettimeofday(&con->reader_reconnect_time, NULL);//set this time to take ownership of reconnect
+            rtTime_Now(&con->reader_reconnect_time);//set this time to take ownership of reconnect
         }
       }
       else

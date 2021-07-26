@@ -27,8 +27,8 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
+#include <sys/time.h>
 #include "rtLog.h"
-#include "rtTime.h"
 
 #ifndef WIN32
 #include <unistd.h>
@@ -212,10 +212,14 @@ void rtLogPrintf(rtLogLevel level, const char* file, int line, const char* forma
   }
   else
   {
-    rtTime_t tm;
-    char tbuff[50];
-    rtTime_Now(&tm);
-    printf("%s %5s %s:%d -- Thread-%" RT_THREADID_FMT ": %s \n", rtTime_ToString(&tm, tbuff), rtLogLevelToString(level), path, line, threadId, buff);
+    struct timeval tv;
+    struct tm* lt;
+    gettimeofday(&tv, NULL);
+    lt = localtime(&tv.tv_sec);
+
+    printf("%.2d:%.2d:%.2d.%.3ld %5s %s:%d -- Thread-%" RT_THREADID_FMT ": %s \n",
+        lt->tm_hour, lt->tm_min, lt->tm_sec, tv.tv_usec / 1000,
+        rtLogLevelToString(level), path, line, threadId, buff);
   }
 }
 

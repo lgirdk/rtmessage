@@ -26,15 +26,17 @@
 #include <string.h>
 #include <time.h>
 
+#define RT_CLOCK_ID CLOCK_MONOTONIC
+
 void rtTime_Now(rtTime_t* t)
 {
     int rc;
 
-    rc = gettimeofday(t, NULL);
+    rc = clock_gettime(RT_CLOCK_ID, t);
 
     if(rc == -1)
     {
-        rtLog_Error("gettimeofday failed: %s", rtStrError(rtErrorFromErrno(errno)));
+        rtLog_Error("clock_gettime failed: %s", rtStrError(rtErrorFromErrno(errno)));
     }
 }
 
@@ -49,12 +51,12 @@ void rtTime_Later(rtTime_t* start, int ms, rtTime_t* result)
     }
 
     result->tv_sec = start->tv_sec + ms / 1000;
-    result->tv_usec = start->tv_usec + (ms % 1000) * 1000;
+    result->tv_nsec = start->tv_nsec + (ms % 1000) * 1000000;
 
-    if(result->tv_usec >= 1000000)
+    if(result->tv_nsec >= 1000000000)
     {
         result->tv_sec++;
-        result->tv_usec -= 1000000;
+        result->tv_nsec -= 1000000000;
     }
 }
 
@@ -69,15 +71,15 @@ int rtTime_Elapsed(rtTime_t* start, rtTime_t* end)
         end = &now;
     }
 
-    if(end->tv_usec >= start->tv_usec)
+    if(end->tv_nsec >= start->tv_nsec)
     {
         ms = (end->tv_sec - start->tv_sec) * 1000
-           + (end->tv_usec - start->tv_usec) / 1000;
+           + (end->tv_nsec - start->tv_nsec) / 1000000;
     }
     else
     {
         ms = (end->tv_sec - start->tv_sec - 1) * 1000
-           + (1000000 + end->tv_usec - start->tv_usec) / 1000;
+           + (1000000000 + end->tv_nsec - start->tv_nsec) / 1000000;
     }
 
     return ms;
@@ -98,13 +100,13 @@ int rtTime_Compare(rtTime_t* left, rtTime_t* right)
 
     if(left->tv_sec < right->tv_sec ||
         ((left->tv_sec == right->tv_sec) && 
-          left->tv_usec < right->tv_usec))
+          left->tv_nsec < right->tv_nsec))
     {
         return -1;
     }
     else if(left->tv_sec > right->tv_sec ||
         ((left->tv_sec == right->tv_sec) && 
-          left->tv_usec > right->tv_usec))
+          left->tv_nsec > right->tv_nsec))
     {
         return 1;
     }
@@ -120,15 +122,14 @@ const char* rtTime_ToString(rtTime_t* tm, char* buffer)
     struct tm* lt = localtime(&tm->tv_sec);
 
     sprintf(buffer, "%.2d:%.2d:%.2d.%.3ld", 
-        lt->tm_hour, lt->tm_min, lt->tm_sec, tm->tv_usec / 1000);
+        lt->tm_hour, lt->tm_min, lt->tm_sec, tm->tv_nsec / 1000000);
 
     return buffer;
 }
 
 const rtTimespec_t* rtTime_ToTimespec(rtTime_t* tm, rtTimespec_t* result)
 {
-    result->tv_sec = tm->tv_sec;
-    result->tv_nsec = tm->tv_usec * 1000;
+    *result = *tm;
 
     return result;
 }

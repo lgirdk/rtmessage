@@ -170,6 +170,7 @@ if (BUILD_RTMESSAGE_LIB)
       rtVector.c
       rtList.c
       rtTime.c
+      rtSemaphore.c
       rtRetainable.c
       rtBase64.c
       local_benchmarking.c)
