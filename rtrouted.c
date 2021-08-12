@@ -123,7 +123,7 @@ rtVector listeners;
 rtVector routes;
 rtRoutingTree routingTree;
 rtList g_discovery_result = NULL;
-static int g_enable_traffic_monitor = 0;
+int g_enable_traffic_monitor = 0;
 int is_running = 1;
 
 //rtListener        listeners[RTMSG_MAX_LISTENERS];
@@ -537,23 +537,66 @@ rtRouted_SendMessage(rtMessageHeader * request_hdr, rtMessage message, rtConnect
   return ret;
 }
 
-static rtError 
-rtRouted_PrintMessage(rtConnectedClient* sender, rtMessageHeader* hdr, uint8_t const* buff,
-  int n, rtSubscription* subscription)
+
+rtError rtRouted_TrafficMonitorLog(rtConnectedClient* sender, rtMessageHeader* hdr, uint8_t const* buff, int n, rtSubscription* subscription)
 {
-  (void) hdr;
+  static FILE* file = NULL;
+  static int counter = 0;
+
   (void) sender;
   (void) subscription;
 
-  printf("message header: sender: %s, recipient: %s\n", hdr->reply_topic, hdr->topic);
-  rtMessage m;
-  char* text_buff = NULL;
-  uint32_t buff_length = 0;
-  rtMessage_FromBytes(&m, buff, n);
-  rtMessage_ToString(m, &text_buff, &buff_length);
-  printf("payload: %.*s\n", buff_length, text_buff);
-  free(text_buff);
-  rtMessage_Release(m);
+  if(!file)
+  {
+    file = fopen("/tmp/rtrouted_traffic_monitor", "a");
+    if(!file)
+    {
+      rtLog_Warn("Failed to open traffix monitor log");
+      return RT_FAIL;
+    }
+  }
+
+  fprintf(file, "%d %s %s %s %s %d [", 
+    counter++, 
+    sender->inbox, 
+    subscription->client->inbox, 
+    hdr->topic, 
+    hdr->reply_topic, 
+    n);
+
+  if(buff && n)
+  {
+    int i;
+    int isprint = 0;
+    for(i = 0; i < n; ++i)
+    {
+      if(buff[i] >= 32 && buff[i] <= 127)
+      {
+        if(!isprint)
+        {
+          isprint = 1;
+          fprintf(file, "\"");
+        }
+        fprintf(file, "%c", buff[i]);
+      }
+      else
+      {
+        if(isprint)
+        {
+          isprint = 0;
+          fprintf(file, "\"");
+        }
+        fprintf(file, " 0x%x ", buff[i]);
+      }
+    }
+    if(isprint)
+    {
+      isprint = 0;
+      fprintf(file, "\"");
+    }
+  }
+  fprintf(file, "]\n");
+  fflush(file);
   return RT_OK;
 }
 
@@ -565,7 +608,7 @@ rtRouted_ForwardMessage(rtConnectedClient* sender, rtMessageHeader* hdr, uint8_t
   (void) sender;
 
   if(1 == g_enable_traffic_monitor)
-    rtRouted_PrintMessage(sender, hdr, buff, n, subscription);
+    rtRouted_TrafficMonitorLog(sender, hdr, buff, n, subscription);
 
   rtMessageHeader new_header;
   rtMessageHeader_Init(&new_header);
@@ -1760,7 +1803,7 @@ int main(int argc, char* argv[])
       {
         route = (rtRouteEntry *) malloc(sizeof(rtRouteEntry));
         route->subscription = NULL;
-        route->message_handler = &rtRouted_PrintMessage;
+        route->message_handler = &rtRouted_TrafficMonitorLog;
         strncpy(route->expression, ">", RTMSG_MAX_EXPRESSION_LEN-1);
         rtVector_PushBack(routes, route);
       }
@@ -1813,6 +1856,9 @@ int main(int argc, char* argv[])
 	    rtRouted_BindListener(socket_name[i], use_no_delay);
     }
   }
+
+  if(access("/nvram/rtrouted_traffic_monitor", F_OK) == 0)
+    g_enable_traffic_monitor = 1;
 
   while (is_running)
   {
