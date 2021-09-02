@@ -30,7 +30,6 @@
 #include "rtRetainable.h"
 #include "rtTime.h"
 #include "rtSemaphore.h"
-#include <wait.h>
 #include <dlfcn.h>
 
 #if defined(__GNUC__)                                                          \
