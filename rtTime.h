@@ -42,7 +42,7 @@ void rtTime_Now(rtTime_t* result);
  *  @param  ms      miliseconds to add to 'from' time
  *  @param  result  resulting time
  */
-void rtTime_Later(rtTime_t* from, int ms, rtTime_t* result);
+void rtTime_Later(const rtTime_t* from, int ms, rtTime_t* result);
 
 
 /** @fn int rtTime_Elapsed (rtTime_t* start, rtTime_t* end)
@@ -51,7 +51,7 @@ void rtTime_Later(rtTime_t* from, int ms, rtTime_t* result);
  *  @param  end      end time.  if NULL, now will be use
  *  @return elapsed time in miliseconds
  */
-int rtTime_Elapsed(rtTime_t* start, rtTime_t* end);
+int rtTime_Elapsed(const rtTime_t* start, const rtTime_t* end);
 
 
 /** @fn int rtTime_Compare (rtTime_t* left, rtTime_t* right)
@@ -62,7 +62,7 @@ int rtTime_Elapsed(rtTime_t* start, rtTime_t* end);
  *           1 if left time is after right time
  *           0 if left and right times are equal to the milisecond
  */
-int rtTime_Compare(rtTime_t* left, rtTime_t* right);
+int rtTime_Compare(const  rtTime_t* left, const rtTime_t* right);
 
 /** @fn const char* rtTime_ToString (rtTime_t* tm, char* buffer)
  *  @brief Convert time into a friendly string in the format HH:MM:SS.mmm (mmm=miliseconds) (e.g. 12:30:15.250)
@@ -70,7 +70,7 @@ int rtTime_Compare(rtTime_t* left, rtTime_t* right);
  *  @param  buffer  a buffer to put the string into. should have minimum capactity of 13 bytes
  *  @return buffer param with result
  */
-const char* rtTime_ToString(rtTime_t* tm, char* buffer);
+const char* rtTime_ToString(const rtTime_t* tm, char* buffer);
 
 /** @fn const rtTimespec_t* rtTime_ToTimespec (rtTime_t* tm, struct timespec* result)
  *  @brief Convert time into a timespec needed by some functions such as pthread_cond_timedwait
@@ -78,7 +78,7 @@ const char* rtTime_ToString(rtTime_t* tm, char* buffer);
  *  @param  result  resulting timespec
  *  @return timespec result
  */
-const rtTimespec_t* rtTime_ToTimespec(rtTime_t* tm, rtTimespec_t* result);
+const rtTimespec_t* rtTime_ToTimespec(const rtTime_t* tm, rtTimespec_t* result);
 
 #ifdef __cplusplus
 }

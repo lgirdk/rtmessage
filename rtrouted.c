@@ -19,6 +19,7 @@
 ##########################################################################
 */
 #include "rtMessage.h"
+#include "rtTime.h"
 #include "rtCipher.h"
 #include "rtDebug.h"
 #include "rtLog.h"
@@ -124,6 +125,7 @@ rtRoutingTree routingTree;
 rtList g_discovery_result = NULL;
 static int g_enable_traffic_monitor = 0;
 int is_running = 1;
+
 //rtListener        listeners[RTMSG_MAX_LISTENERS];
 //rtRouteEntry      routes[RTMSG_MAX_ROUTES];
 
@@ -365,16 +367,51 @@ rtRouted_AddRoute(rtRouteMessageHandler handler, char const* exp, rtSubscription
   strncpy(route->expression, exp, RTMSG_MAX_EXPRESSION_LEN);
   rtVector_PushBack(routes, route);
   rtLog_Debug("AddRoute route=[%p] address=[%s] expression=[%s]", route, subscription->client->ident, exp);
-  rtRoutingTree_AddTopicRoute(routingTree, exp, (void *)route);
+  rtRoutingTree_AddTopicRoute(routingTree, exp, (void *)route, 0/*ignfore duplicate entry*/);
   return RT_OK;
+}
+
+static bool
+rtRouted_ShouldLimitLog(char const* pTopicExpression)
+{
+    static const int LOGGING_TIMELIMIT_DUP_ENTRY = 60000; /* 60s interval */
+    static char storedTopicExp[RTMSG_MAX_EXPRESSION_LEN] = "";
+    static rtTime_t storedTime = {0};
+    rtTime_t currentTime = {0};
+
+    if (strncmp(storedTopicExp, pTopicExpression, RTMSG_MAX_EXPRESSION_LEN) == 0)
+    {
+        int timeDiff = -2;
+        rtTime_Now(&currentTime);
+        timeDiff = rtTime_Elapsed (&storedTime, &currentTime);
+
+        if (timeDiff >= LOGGING_TIMELIMIT_DUP_ENTRY)
+        {
+            rtTime_Now(&storedTime);
+            return true;
+        }
+
+        return false;
+    }
+    else
+    {
+        rtTime_Now(&storedTime);
+        snprintf(storedTopicExp, RTMSG_MAX_EXPRESSION_LEN - 1, "%s", pTopicExpression);
+        return true;
+    }
 }
 
 static rtError
 rtRouted_AddAlias(char const* exp, rtRouteEntry * route)
 {
+  rtError rc = RT_OK;
   rtLog_Debug("AddAlias route=[%p] address=[%s] expression=[%s] alias=[%s]", route, route->subscription->client->ident, route->expression, exp);
-  rtRoutingTree_AddTopicRoute(routingTree, exp, (void *)route);
-  return RT_OK;
+  rc = rtRoutingTree_AddTopicRoute(routingTree, exp, (void *)route, 1/*error if duplicate entry*/);
+  if (RT_ERROR_DUPLICATE_ENTRY == rc)
+      if (rtRouted_ShouldLimitLog(exp))
+          rtLog_Warn("Rejecting Duplicate Registration of [%s] by [%s] thro [%s]", exp, route->expression, route->subscription->client->ident);
+
+  return rc;
 }
 
   static rtError
@@ -641,73 +678,89 @@ rtRouted_OnMessageSubscribe(rtConnectedClient* sender, rtMessageHeader* hdr, uin
   uint32_t i = 0;
   int32_t add_subscrption = 0;
   rtMessage m;
+  rtMessage response = NULL;
+  rtError rc = RT_OK;
 
   if(RT_OK != rtMessage_FromBytes(&m, buff, n))
   {
     rtLog_Warn("Bad Subscribe message");
     rtLog_Warn("Sender %s", sender->ident);
-    return;
+    rc = RT_ERROR;
   }
-
-  if((RT_OK == rtMessage_GetInt32(m, "add", &add_subscrption)) && 
-     (RT_OK == rtMessage_GetString(m, "topic", &expression)) &&
-     (RT_OK == rtMessage_GetInt32(m, "route_id", (int32_t *)&route_id)) && 
-     (0 == validate_string(expression, RTMSG_MAX_EXPRESSION_LEN)))
-  {  
-    if(1 == add_subscrption)
+  else
+  {
+    if((RT_OK == rtMessage_GetInt32(m, "add", &add_subscrption)) &&
+       (RT_OK == rtMessage_GetString(m, "topic", &expression)) &&
+       (RT_OK == rtMessage_GetInt32(m, "route_id", (int32_t *)&route_id)) &&
+       (0 == validate_string(expression, RTMSG_MAX_EXPRESSION_LEN)))
     {
-      for (i = 0; i < rtVector_Size(routes); i++)
+      if(1 == add_subscrption)
       {
-        rtRouteEntry* route = (rtRouteEntry *) rtVector_At(routes, i);
-        if (route->subscription && (route->subscription->client == sender) && (route->subscription->id == route_id))
+        for (i = 0; i < rtVector_Size(routes); i++)
         {
-          rtRouted_AddAlias(expression, route);
-          break;
+          rtRouteEntry* route = (rtRouteEntry *) rtVector_At(routes, i);
+          if (route->subscription && (route->subscription->client == sender) && (route->subscription->id == route_id))
+          {
+            rc = rtRouted_AddAlias(expression, route);
+            break;
+          }
+        }
+        if(i == rtVector_Size(routes))
+        {
+          rtSubscription* subscription = (rtSubscription *) malloc(sizeof(rtSubscription));
+          subscription->id = route_id;
+          subscription->client = sender;
+          rc = rtRouted_AddRoute(rtRouted_ForwardMessage, expression, subscription);
+
+          if(strstr(expression, ".INBOX.") && sender->inbox[0] == '\0')
+          {
+              strncpy(sender->inbox, expression, RTMSG_HEADER_MAX_TOPIC_LENGTH);
+              rtLog_Debug("init client inbox to %s", sender->inbox);
+              rtRouted_SendAdvisoryMessage(sender, rtAdviseClientConnect);
+          }
         }
       }
-      if(i == rtVector_Size(routes))
+      else
       {
-        rtSubscription* subscription = (rtSubscription *) malloc(sizeof(rtSubscription));
-        subscription->id = route_id;
-        subscription->client = sender;
-        rtRouted_AddRoute(rtRouted_ForwardMessage, expression, subscription);
-
-        if(strstr(expression, ".INBOX.") && sender->inbox[0] == '\0')
+        int route_removed = 0;
+        for (i = 0; i < rtVector_Size(routes); i++)
         {
-            strncpy(sender->inbox, expression, RTMSG_HEADER_MAX_TOPIC_LENGTH);
-            rtLog_Debug("init client inbox to %s", sender->inbox);
-            rtRouted_SendAdvisoryMessage(sender, rtAdviseClientConnect);
+          rtRouteEntry* route = (rtRouteEntry *) rtVector_At(routes, i);
+
+          if((route->subscription) && (0 == strncmp(route->expression, expression, RTMSG_MAX_EXPRESSION_LEN)) && (route->subscription->client == sender))
+          {
+            rtRouted_ClearRoute(route);
+            route_removed = 1;
+            break;
+          }
+        }
+        if(0 == route_removed)
+        {
+          //Not a route. Is it an alias?
+          rtLog_Debug("Removing alias %s", expression);
+          rtRoutingTree_RemoveTopic(routingTree, expression);
         }
       }
     }
     else
     {
-      int route_removed = 0;
-      for (i = 0; i < rtVector_Size(routes); i++)
-      {
-        rtRouteEntry* route = (rtRouteEntry *) rtVector_At(routes, i);
-        if((route->subscription) && (0 == strncmp(route->expression, expression, RTMSG_MAX_EXPRESSION_LEN)) && (route->subscription->client == sender))
-        {
-          rtRouted_ClearRoute(route);
-          route_removed = 1;
-          break;
-        }
-      }
-      if(0 == route_removed)
-      {
-        //Not a route. Is it an alias?
-        rtLog_Debug("Removing alias %s", expression);
-        rtRoutingTree_RemoveTopic(routingTree, expression);
-      }
+      rtLog_Warn("Bad subscription message from %s", sender->ident);
+      rc = RT_ERROR_INVALID_ARG;
     }
-  }
-  else
-  {
-    rtLog_Warn("Bad subscription message from %s", sender->ident);
   }
   rtMessage_Release(m);
 
-  (void)hdr;
+  /* Send Response */
+  if(hdr->flags & rtMessageFlags_Request)
+  {
+      rtMessage_Create(&response);
+      rtMessage_SetInt32(response, "result", rc);
+      rtMessageHeader new_header;
+      prep_reply_header_from_request(&new_header, hdr);
+      if(RT_OK != rtRouted_SendMessage(&new_header, response, NULL))
+          rtLog_Info("%s() Response couldn't be sent.", __func__);
+      rtMessage_Release(response);
+  }
 }
 
 static void
@@ -1440,7 +1493,7 @@ rtRouted_PushFd(fd_set* fds, int fd, int* maxFd)
 static void
 rtRouted_RegisterNewClient(int fd, struct sockaddr_storage* remote_endpoint)
 {
-  char remote_address[128];
+  char remote_address[108];
   uint16_t remote_port;
   rtConnectedClient* new_client;
 
@@ -1631,14 +1684,14 @@ int main(int argc, char* argv[])
     strncpy(route->expression, "_RTROUTED.>", RTMSG_MAX_EXPRESSION_LEN-1);
     route->message_handler = rtRouted_OnMessage;
     rtVector_PushBack(routes, route);
-    rtRoutingTree_AddTopicRoute(routingTree, "_RTROUTED.INBOX.SUBSCRIBE", (void *)route);
-    rtRoutingTree_AddTopicRoute(routingTree, RTM_DISCOVER_WILDCARD_DESTINATIONS, (void *)route);
-    rtRoutingTree_AddTopicRoute(routingTree, RTM_DISCOVER_REGISTERED_COMPONENTS, (void *)route);
-    rtRoutingTree_AddTopicRoute(routingTree, RTM_DISCOVER_OBJECT_ELEMENTS, (void *)route);
-    rtRoutingTree_AddTopicRoute(routingTree, RTM_DISCOVER_ELEMENT_OBJECTS, (void *)route);
-    rtRoutingTree_AddTopicRoute(routingTree, RTROUTER_DIAG_DESTINATION, (void *)route);
+    rtRoutingTree_AddTopicRoute(routingTree, "_RTROUTED.INBOX.SUBSCRIBE", (void *)route, 0);
+    rtRoutingTree_AddTopicRoute(routingTree, RTM_DISCOVER_WILDCARD_DESTINATIONS, (void *)route, 0);
+    rtRoutingTree_AddTopicRoute(routingTree, RTM_DISCOVER_REGISTERED_COMPONENTS, (void *)route, 0);
+    rtRoutingTree_AddTopicRoute(routingTree, RTM_DISCOVER_OBJECT_ELEMENTS, (void *)route, 0);
+    rtRoutingTree_AddTopicRoute(routingTree, RTM_DISCOVER_ELEMENT_OBJECTS, (void *)route, 0);
+    rtRoutingTree_AddTopicRoute(routingTree, RTROUTER_DIAG_DESTINATION, (void *)route, 0);
 #ifdef WITH_SPAKE2
-    rtRoutingTree_AddTopicRoute(routingTree, RTROUTED_KEY_EXCHANGE, (void *)route);
+    rtRoutingTree_AddTopicRoute(routingTree, RTROUTED_KEY_EXCHANGE, (void *)route, 0);
 #endif
   }
 

@@ -40,7 +40,7 @@ void rtTime_Now(rtTime_t* t)
     }
 }
 
-void rtTime_Later(rtTime_t* start, int ms, rtTime_t* result)
+void rtTime_Later(const rtTime_t* start, int ms, rtTime_t* result)
 {
     rtTime_t now;
 
@@ -60,7 +60,7 @@ void rtTime_Later(rtTime_t* start, int ms, rtTime_t* result)
     }
 }
 
-int rtTime_Elapsed(rtTime_t* start, rtTime_t* end)
+int rtTime_Elapsed(const rtTime_t* start, const rtTime_t* end)
 {
     int ms = 0;
     rtTime_t now;
@@ -85,7 +85,7 @@ int rtTime_Elapsed(rtTime_t* start, rtTime_t* end)
     return ms;
 }
 
-int rtTime_Compare(rtTime_t* left, rtTime_t* right)
+int rtTime_Compare(const rtTime_t* left, const rtTime_t* right)
 {
     rtTime_t now;
 
@@ -116,7 +116,7 @@ int rtTime_Compare(rtTime_t* left, rtTime_t* right)
     }
 }
 
-const char* rtTime_ToString(rtTime_t* tm, char* buffer)
+const char* rtTime_ToString(const rtTime_t* tm, char* buffer)
 {
     /*localtime may not be thread safe*/
     struct tm* lt = localtime(&tm->tv_sec);
@@ -127,7 +127,7 @@ const char* rtTime_ToString(rtTime_t* tm, char* buffer)
     return buffer;
 }
 
-const rtTimespec_t* rtTime_ToTimespec(rtTime_t* tm, rtTimespec_t* result)
+const rtTimespec_t* rtTime_ToTimespec(const rtTime_t* tm, rtTimespec_t* result)
 {
     *result = *tm;
 

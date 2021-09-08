@@ -135,7 +135,6 @@ static void removeTopicFromRoutes(rtRoutingTree rt, rtTreeTopic* topic)
     rtListItem routeItem;
     rtTreeRoute* route;
     size_t size;
-
     rtList_GetFront(topic->routeList, &routeItem);
     while(routeItem)
     {
@@ -166,6 +165,7 @@ static rtTreeTopic* getChildByName(rtRoutingTree rt, rtTreeTopic* parent, const 
     if(created)
         *created = 0;
     rtList_GetFront(parent->childList, &item);
+
     while(item)
     {
         rtTreeTopic* treeTopic;
@@ -432,8 +432,9 @@ void rtRoutingTree_Destroy(rtRoutingTree rt)
     free(rt);
 }
 
-void rtRoutingTree_AddTopicRoute(rtRoutingTree rt, const char* topicPath, const void* routeData)
+rtError rtRoutingTree_AddTopicRoute(rtRoutingTree rt, const char* topicPath, const void* routeData, int err_on_dup)
 {
+    rtError rc = RT_OK;
     int i;
     rtTreeTopic* topic = rt->topicRoot;
     rtTreeRoute* route;
@@ -442,7 +443,7 @@ void rtRoutingTree_AddTopicRoute(rtRoutingTree rt, const char* topicPath, const 
 
     tokenizeExpression(topicPath);
     if(workTokenCount == 0)
-        return;
+        return rc;
 
     route = getTreeRoute(rt, routeData, NULL);
     if(!route)
@@ -453,9 +454,17 @@ void rtRoutingTree_AddTopicRoute(rtRoutingTree rt, const char* topicPath, const 
         rtList_PushBack(rt->routeList, route, NULL);
     }
 
+    int isCreated = 0;
     for(i = 0; i < workTokenCount; ++i)
     {
-        topic = getChildByName(rt, topic, workTokens[i].name, 1/*create missing topic*/,NULL, 0);
+        topic = getChildByName(rt, topic, workTokens[i].name, 1/*create missing topic*/, &isCreated, 0);
+    }
+
+    if (err_on_dup && (0 == isCreated) && (0 != strcmp (topicPath, "_RTROUTED.ADVISORY")))
+    {
+        /* Controlled Error log will be printed in rtrouted */
+        rtLog_Debug("Rejecting a duplicate registraion");
+        return RT_ERROR_DUPLICATE_ENTRY;
     }
 
     if(!topic->routeList)
@@ -467,6 +476,7 @@ void rtRoutingTree_AddTopicRoute(rtRoutingTree rt, const char* topicPath, const 
 
     if(topic->parent->parent)
         optimizeTopicsBackpropagate(topic->parent, route);
+    return RT_OK;
 }
 
 void rtRoutingTree_GetTopicRoutes(rtRoutingTree rt, const char* topic, rtList* routes)
@@ -642,10 +652,13 @@ void rtRoutingTree_ResolvePartialPath(rtRoutingTree rt, const char* partialPath,
 
             rtListItem topicItem;
             rtTreeTopic* topic;
-            rtList_GetFront(route->topicList, &topicItem);
-            rtListItem_GetData(topicItem, (void**)&topic); 
+            if (route->topicList)
+            {
+                rtList_GetFront(route->topicList, &topicItem);
+                rtListItem_GetData(topicItem, (void**)&topic);
             
-            rtList_PushBack(topics, topic->fullName, NULL);
+                rtList_PushBack(topics, topic->fullName, NULL);
+            }
         }
     }
 }

@@ -1147,6 +1147,23 @@ rtConnection_AddListener(rtConnection con, char const* expression, rtMessageCall
   int i;
 
   pthread_mutex_lock(&con->mutex);
+
+  /*Prevent a client from adding multiple listener callbacks to the same expression.
+    This is not the same as preventing duplicate entries in rtrouted (i.e. RT_ERROR_DUPLICATE_ENTRY).
+    This is to not break rtConnection_RemoveListener which doesn't take a callback parameter
+    and can't know which listener callback (if there were multi) you want to remove.
+    So we just prevent multi adds here to prevent RemoveListner issues*/
+  for (i = 0; i < RTMSG_LISTENERS_MAX; ++i)
+  {
+    if ((con->listeners[i].in_use) && (0 == strcmp(expression, con->listeners[i].expression)))
+    {
+      rtLog_Error("Listener already exist for %s.  Multiple callbacks to the same expression not allowed.", expression);
+      pthread_mutex_unlock(&con->mutex);
+      return RT_FAIL;
+    }
+  }
+
+  /*find an open listener to use*/
   for (i = 0; i < RTMSG_LISTENERS_MAX; ++i)
   {
     if (!con->listeners[i].in_use)
@@ -1174,7 +1191,7 @@ rtConnection_AddListener(rtConnection con, char const* expression, rtMessageCall
   rtConnection_SendMessage(con, m, "_RTROUTED.INBOX.SUBSCRIBE");
   rtMessage_Release(m);
 
-  return 0;
+  return RT_OK;
 }
 
 rtError
@@ -1216,6 +1233,7 @@ rtError
 rtConnection_AddAlias(rtConnection con, char const* existing, const char *alias)
 {
   int i;
+  rtError ret = RT_OK;
 
   for (i = 0; i < RTMSG_LISTENERS_MAX; ++i)
   {
@@ -1224,22 +1242,31 @@ rtConnection_AddAlias(rtConnection con, char const* existing, const char *alias)
       if(0 == strncmp(con->listeners[i].expression, existing, (strlen(con->listeners[i].expression) + 1)))
       {
         rtMessage m;
+        rtMessage res;
         rtMessage_Create(&m);
         rtMessage_SetInt32(m, "add", 1);
         rtMessage_SetString(m, "topic", alias);
         rtMessage_SetInt32(m, "route_id", con->listeners[i].subscription_id); 
-        rtConnection_SendMessage(con, m, "_RTROUTED.INBOX.SUBSCRIBE");
+        ret = rtConnection_SendRequest(con, m, "_RTROUTED.INBOX.SUBSCRIBE", &res, 6000);
+        if(RT_OK == ret)
+        {
+            int result = 0;
+            rtMessage_GetInt32(res, "result", &result);
+            ret = result;
+            if(RT_ERROR_DUPLICATE_ENTRY == result)
+                rtLog_Error("Failed to register %s. Duplicate entry", alias);
+            rtMessage_Release(res);
+        }
         rtMessage_Release(m);
         break;
       }
     }
-
   }
 
   if (i >= RTMSG_LISTENERS_MAX)
     return rtErrorFromErrno(ENOMEM);
 
-  return 0;
+  return ret;
 }
 rtError
 rtConnection_RemoveAlias(rtConnection con, char const* existing, const char *alias)
