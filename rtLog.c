@@ -217,8 +217,8 @@ void rtLogPrintf(rtLogLevel level, const char* file, int line, const char* forma
     gettimeofday(&tv, NULL);
     lt = localtime(&tv.tv_sec);
 
-    printf("%.2d:%.2d:%.2d.%.3ld %5s %s:%d -- Thread-%" RT_THREADID_FMT ": %s \n",
-        lt->tm_hour, lt->tm_min, lt->tm_sec, tv.tv_usec / 1000,
+    printf("%.2d:%.2d:%.2d.%.3lld %5s %s:%d -- Thread-%" RT_THREADID_FMT ": %s \n",
+        lt->tm_hour, lt->tm_min, lt->tm_sec, (long long int)tv.tv_usec,
         rtLogLevelToString(level), path, line, threadId, buff);
   }
 }
