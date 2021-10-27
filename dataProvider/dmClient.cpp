@@ -46,7 +46,7 @@ public:
   dmClientImpl(std::string const& datamodelDir, rtLogLevel logLevel)
   {
     rtLog_SetLevel(logLevel);
-    rtLog_Warn("create data base dmClient");
+    rtLog_Debug("create data base dmClient");
     m_db = new dmProviderDatabase(datamodelDir);
   }
 
@@ -66,7 +66,7 @@ public:
 
     if (dmUtility::isWildcard(objectName.c_str()))
     {
-      rtLog_Warn("runQuery isWildcard %s", objectName.c_str());
+      rtLog_Debug("runQuery isWildcard %s", objectName.c_str());
       isWildcard = true;
       //objectName = dmUtility::trimWildcard(objectName);
 
@@ -76,7 +76,7 @@ public:
         rtLog_Warn("runQuery no providerinfo");
         return false;
       }
-      rtLog_Warn("runQuery providerInfo info=%s objectName=%s list=%d isListItem=%d", providerInfo->objectName().c_str(), objectName.c_str(), (int)providerInfo->isList(), (int)isListItem);
+      rtLog_Info("runQuery providerInfo info=%s objectName=%s list=%d isListItem=%d", providerInfo->objectName().c_str(), objectName.c_str(), (int)providerInfo->isList(), (int)isListItem);
       if(!isListItem && providerInfo->isList())
         isList = true;
     }
@@ -86,7 +86,7 @@ public:
       std::string list_name = dmUtility::trimWildcard(parameter);
       std::string parent_name = dmUtility::trimProperty(list_name);
       dmValue value(0);
-      rtLog_Warn("dmcli_get list=%s parent=%s", list_name.c_str(), parent_name.c_str());
+      rtLog_Debug("dmcli_get list=%s parent=%s", list_name.c_str(), parent_name.c_str());
 
       std::string num_entries_param = list_name + "NumberOfEntries";
       if(!runOneQuery(dmProviderOperation_Get, num_entries_param, nullptr, &value))
@@ -95,7 +95,7 @@ public:
         return false;
       }
       int num_entries = atoi(value.toString().c_str());
-      rtLog_Warn("dmcli_get list num_entries=%d", num_entries);
+      rtLog_Debug("dmcli_get list num_entries=%d", num_entries);
 
       std::string alias_entries_param = list_name + "IdsOfEntries";
       if(!runOneQuery(dmProviderOperation_Get, alias_entries_param , nullptr, &value))
@@ -106,11 +106,11 @@ public:
       }
 
       std::string entries = value.toString().c_str();
-      rtLog_Warn("dmcli_get list entries=%s", entries.c_str());
+      rtLog_Debug("dmcli_get list entries=%s", entries.c_str());
 
       std::vector<std::string> out;
       dmUtility::splitString(entries, ',', out);
-      rtLog_Warn("dmcli_get split=%d", (int)out.size());
+      rtLog_Debug("dmcli_get split=%d", (int)out.size());
       if((int)out.size() != num_entries)
       {
         notifier->onError(RT_FAIL, "dmcli_get list failed: size mismatch");
@@ -129,11 +129,11 @@ public:
         if(recursive)
         {
           std::shared_ptr<dmProviderInfo> objectInfo = m_db->getProviderByPropertyName(list_item_param.str()); 
-          rtLog_Warn("dmcli_get recurse parameter=%s objectName=%s", list_item_param.str().c_str(), objectInfo->objectName().c_str());
+          rtLog_Debug("dmcli_get recurse parameter=%s objectName=%s", list_item_param.str().c_str(), objectInfo->objectName().c_str());
           for(size_t i = 0; i < objectInfo->getChildren().size(); ++i)
           {
             std::string childParameter = list_item_param.str().c_str() + dmUtility::trimPropertyName(objectInfo->getChildren()[i].lock()->objectName()) + ".";
-            rtLog_Warn("dmcli_get childObjectName %s", childParameter.c_str());
+            rtLog_Debug("dmcli_get childObjectName %s", childParameter.c_str());
 
             success = runQuery(dmProviderOperation_Get, childParameter, recursive, notifier);
           }
@@ -147,7 +147,7 @@ public:
       if(recursive)
       {
         std::shared_ptr<dmProviderInfo> objectInfo = m_db->getProviderByPropertyName(parameter); 
-        rtLog_Warn("dmcli_get recurse %s", objectInfo->objectName().c_str());
+        rtLog_Info("dmcli_get recurse %s", objectInfo->objectName().c_str());
         for(size_t i = 0; i < objectInfo->getChildren().size(); ++i)
         {
           std::string childParameter = dmUtility::trimProperty(parameter) + "." + dmUtility::trimPropertyName(objectInfo->getChildren()[i].lock()->objectName()) + ".";
@@ -167,7 +167,7 @@ public:
 
   bool runQuery(dmProviderOperation operation, std::string const& parameter, bool recursive, dmClientNotifier* notifier)
   {
-    rtLog_Warn("runQuery %s", parameter.c_str());
+    rtLog_Debug("runQuery %s", parameter.c_str());
     if(operation == dmProviderOperation_Get)
       return runGet(parameter,recursive,notifier);
     else
@@ -178,7 +178,7 @@ private:
 
   bool runOneQuery(dmProviderOperation op, std::string const& parameter, dmClientNotifier* notifier, dmValue* value = nullptr)
   {
-    rtLog_Warn("runOneQuery %s", parameter.c_str());
+    rtLog_Debug("runOneQuery %s", parameter.c_str());
     std::unique_ptr<dmQuery> query(m_db->createQuery(op, parameter.c_str()));
 
     if (!query)
