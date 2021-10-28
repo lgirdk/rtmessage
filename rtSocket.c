@@ -33,6 +33,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <sys/stat.h>
 
 int
 rtSocket_IsNumeric(char const* s)
@@ -176,6 +177,9 @@ rtSocketStorage_FromString(struct sockaddr_storage* ss, char const* addr)
     struct sockaddr_un* un = (struct sockaddr_un*) ss;
     un->sun_family = AF_UNIX;
     strncpy(un->sun_path, addr + 7, (sizeof(un->sun_path)-1));
+    if (chmod(un->sun_path, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH) < 0) {
+        rtLog_Warn("could not set mode 0666 on socket %s\n", un->sun_path);
+    }
     return RT_OK;
   }
 
