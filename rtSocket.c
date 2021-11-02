@@ -136,7 +136,7 @@ rtSocketStorage_ToString(struct sockaddr_storage* ss, char* buff, int n, uint16_
     struct sockaddr_un* un = (struct sockaddr_un *) ss;
     if (port)
       *port = 0;
-    snprintf(buff, (sizeof(n) - 1), "%s%s", "unix://", un->sun_path);
+    snprintf(buff, n, "%s%s", "unix://", un->sun_path);
   }
 
   return RT_OK;
