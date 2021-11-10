@@ -24,7 +24,7 @@
 #include "rtBase64.h"
 #include "rtAtomic.h"
 
-#include <cJSON.h>
+#include <cjson/cJSON.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
