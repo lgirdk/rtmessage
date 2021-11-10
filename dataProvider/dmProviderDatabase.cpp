@@ -39,7 +39,7 @@
 #include "rtError.h"
 #include "rtLog.h"
 
-#include <cJSON.h>
+#include <cjson/cJSON.h>
 
 #include "dmUtility.h"
 #include "dmProviderInfo.h"

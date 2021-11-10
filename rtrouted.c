@@ -51,7 +51,7 @@
 #include "rtRoutingTree.h"
 #include "rtm_discovery_api.h"
 #include "local_benchmarking.h"
-#include <cJSON.h>
+#include <cjson/cJSON.h>
 
 #ifdef ENABLE_RDKLOGGER
 #include "rdk_debug.h"
