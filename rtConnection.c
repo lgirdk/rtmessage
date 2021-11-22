@@ -296,6 +296,9 @@ rtConnection_ConnectAndRegister(rtConnection con, rtTime_t* reconnect_time)
   char tbuff2[100];
   char tbuff3[100];
 
+  if (!con)
+    return rtErrorFromErrno(EINVAL);
+
   if(con->fd != -1)
     is_first_connect = false;
 
@@ -467,6 +470,9 @@ rtConnection_ReadUntil(rtConnection con, uint8_t* buff, int count, int32_t timeo
   ssize_t bytes_read = 0;
   ssize_t bytes_to_read = count;
 
+  if (!con)
+    return rtErrorFromErrno(EINVAL);
+
   (void) timeout;
 
   while (bytes_read < bytes_to_read)
@@ -516,6 +522,8 @@ rtConnection_CreateInternal(rtConnection* con, char const* application_name, cha
   rtConnection c = (rtConnection) malloc(sizeof(struct _rtConnection));
   if (!c)
     return rtErrorFromErrno(ENOMEM);
+
+  memset(c, 0, sizeof(struct _rtConnection));
 
   pthread_mutexattr_t mutex_attribute;
   pthread_mutexattr_init(&mutex_attribute);
@@ -595,7 +603,10 @@ rtConnection_CreateInternal(rtConnection* con, char const* application_name, cha
 rtError
 rtConnection_Create(rtConnection* con, char const* application_name, char const* router_config)
 {
-  return rtConnection_CreateInternal(con, application_name, router_config, DEFAULT_MAX_RETRIES);
+  rtError rt_err = rtConnection_CreateInternal(con, application_name, router_config, DEFAULT_MAX_RETRIES);
+  if (rt_err)
+    *con = NULL;
+  return rt_err;
 }
 
 rtError
@@ -741,12 +752,18 @@ rtConnection_Destroy(rtConnection con)
 rtError
 rtConnection_SendMessage(rtConnection con, rtMessage msg, char const* topic)
 {
+  if (!con)
+    return rtErrorFromErrno(EINVAL);
+
   return rtConnection_SendMessageDirect(con, msg, topic, NULL);
 }
 
 rtError
 rtConnection_SendMessageDirect(rtConnection con, rtMessage msg, char const* topic, char const* listener)
 {
+  if (!con)
+    return rtErrorFromErrno(EINVAL);
+
   rtTime_Now(&con->sender_reconnect_time);
   while(1)
   {
@@ -786,6 +803,10 @@ rtConnection_SendRequest(rtConnection con, rtMessage const req, char const* topi
   uint32_t n;
   rtMessageInfo* resMsg;
   rtError err;
+
+  if (!con)
+    return rtErrorFromErrno(EINVAL);
+
   rtMessage_ToByteArrayWithSize(req, &p, DEFAULT_SEND_BUFFER_SIZE, &n);
   err = rtConnection_SendRequestInternal(con, p, n, topic, &resMsg, timeout, 0);
   rtMessage_FreeByteArray(p);
@@ -800,6 +821,9 @@ rtConnection_SendRequest(rtConnection con, rtMessage const req, char const* topi
 rtError
 rtConnection_SendResponse(rtConnection con, rtMessageHeader const* request_hdr, rtMessage const res, int32_t timeout)
 {
+  if (!con)
+    return rtErrorFromErrno(EINVAL);
+
   rtTime_Now(&con->sender_reconnect_time);
   while(1)
   {
@@ -831,6 +855,9 @@ rtConnection_SendResponse(rtConnection con, rtMessageHeader const* request_hdr, 
 rtError
 rtConnection_SendBinary(rtConnection con, uint8_t const* p, uint32_t n, char const* topic)
 {
+  if (!con)
+    return rtErrorFromErrno(EINVAL);
+
   return rtConnection_SendBinaryDirect(con, p, n, topic, NULL);
 }
 
@@ -838,6 +865,9 @@ rtError
 rtConnection_SendBinaryDirect(rtConnection con, uint8_t const* p, uint32_t n, char const* topic,
   char const* listener)
 {
+  if (!con)
+    return rtErrorFromErrno(EINVAL);
+
   rtTime_Now(&con->sender_reconnect_time);
   while(1)
   {
@@ -873,6 +903,10 @@ rtConnection_SendBinaryRequest(rtConnection con, uint8_t const* pReq, uint32_t n
 {
   rtError err;
   rtMessageInfo* mi;
+
+  if (!con)
+    return rtErrorFromErrno(EINVAL);
+
   err = rtConnection_SendRequestInternal(con, pReq, nReq, topic, &mi, timeout, rtMessageFlags_RawBinary);
   if(err == RT_OK)
   {
@@ -903,6 +937,10 @@ rtConnection_SendBinaryResponse(rtConnection con, rtMessageHeader const* request
 {
   (void) timeout;
   rtError err;
+
+  if (!con)
+    return rtErrorFromErrno(EINVAL);
+
   pthread_mutex_lock(&con->mutex);
   err = rtConnection_SendInternal(con, p, n, request_hdr->reply_topic, request_hdr->topic,
     rtMessageFlags_Response|rtMessageFlags_RawBinary, request_hdr->sequence_number);
@@ -914,6 +952,9 @@ rtError
 rtConnection_SendRequestInternal(rtConnection con, uint8_t const* pReq, uint32_t nReq, char const* topic,
   rtMessageInfo** res, int32_t timeout, int flags)
 {
+  if (!con)
+    return rtErrorFromErrno(EINVAL);
+
   rtTime_Now(&con->sender_reconnect_time);
   while(1)
   {
@@ -1058,6 +1099,9 @@ rtConnection_SendInternal(rtConnection con, uint8_t const* buff, uint32_t n, cha
   uint8_t const* message;
   uint32_t message_length;
 
+  if (!con)
+    return rtErrorFromErrno(EINVAL);
+
 #ifdef WITH_SPAKE2
   /*encrypte all non-internal messages*/
   if (rtConnection_IsSecure(con) && topic[0] != '_')
@@ -1146,6 +1190,9 @@ rtConnection_AddListener(rtConnection con, char const* expression, rtMessageCall
 {
   int i;
 
+  if (!con)
+    return rtErrorFromErrno(EINVAL);
+
   pthread_mutex_lock(&con->mutex);
 
   /*Prevent a client from adding multiple listener callbacks to the same expression.
@@ -1199,6 +1246,10 @@ rtConnection_RemoveListener(rtConnection con, char const* expression)
 {
   int i;
   int route_id = 0;
+
+  if (!con)
+    return rtErrorFromErrno(EINVAL);
+
   pthread_mutex_lock(&con->mutex);
   for (i = 0; i < RTMSG_LISTENERS_MAX; ++i)
   {
@@ -1234,6 +1285,9 @@ rtConnection_AddAlias(rtConnection con, char const* existing, const char *alias)
 {
   int i;
   rtError ret = RT_OK;
+
+  if (!con)
+    return rtErrorFromErrno(EINVAL);
 
   for (i = 0; i < RTMSG_LISTENERS_MAX; ++i)
   {
@@ -1273,6 +1327,9 @@ rtConnection_RemoveAlias(rtConnection con, char const* existing, const char *ali
 {
   int i;
 
+  if (!con)
+    return rtErrorFromErrno(EINVAL);
+
   for (i = 0; i < RTMSG_LISTENERS_MAX; ++i)
   {
     if (1 == con->listeners[i].in_use)
@@ -1300,6 +1357,9 @@ rtConnection_RemoveAlias(rtConnection con, char const* existing, const char *ali
 rtError
 rtConnection_AddDefaultListener(rtConnection con, rtMessageCallback callback, void* closure)
 {
+  if (!con)
+    return rtErrorFromErrno(EINVAL);
+
   con->default_callback = callback;
   con->default_closure = closure;
   return 0;
@@ -1349,6 +1409,9 @@ rtConnection_Read(rtConnection con, int32_t timeout)
   max_attempts = 4;
 
   rtMessageInfo_Init(&msginfo);
+
+  if (!con)
+    return rtErrorFromErrno(EINVAL);
 
   // TODO: no error handling right now, all synch I/O
 
@@ -1519,6 +1582,9 @@ void check_router(rtConnection con)
   void *handle;
   char *error;
   int (*fptr)(const char *format, ...);
+
+  if (!con)
+    return rtErrorFromErrno(EINVAL);
 
   rtSocketStorage_ToString(&con->remote_endpoint, remote_addr, sizeof(remote_addr), &remote_port);
   rtLog_Info("remote addr is %s \n",remote_addr);
@@ -1720,6 +1786,10 @@ static void * rtConnection_ReaderThread(void *data)
 static int rtConnection_StartThreads(rtConnection con)
 {
   int ret = 0;
+
+  if (!con)
+    return rtErrorFromErrno(EINVAL);
+
   if(0 == con->run_threads)
   {
     con->run_threads = 1;
