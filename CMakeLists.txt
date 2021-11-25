@@ -24,6 +24,31 @@ cmake_policy(SET CMP0015 NEW)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/")
 find_package(PkgConfig REQUIRED)
 
+IF (NOT DEFINED CMAKE_INSTALL_BINDIR)
+    SET(CMAKE_INSTALL_BINDIR ${CMAKE_INSTALL_PREFIX}/bin)
+ENDIF ()
+
+IF (NOT DEFINED CMAKE_INSTALL_LIBDIR)
+    SET(CMAKE_INSTALL_LIBDIR ${CMAKE_INSTALL_PREFIX}/lib)
+ENDIF ()
+
+include(CMakePackageConfigHelpers)
+
+SET (CMAKE_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/rtMessage")
+
+configure_package_config_file(rtMessageConfig.cmake.in
+  rtMessageConfig.cmake
+  INSTALL_DESTINATION "${CMAKE_INSTALL_CMAKEDIR}")
+
+write_basic_package_version_file(
+  rtMessageConfigVersion.cmake
+  VERSION 1.1.1
+  COMPATIBILITY AnyNewerVersion )
+
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/rtMessageConfig.cmake"
+              "${CMAKE_CURRENT_BINARY_DIR}/rtMessageConfigVersion.cmake"
+        DESTINATION "${CMAKE_INSTALL_CMAKEDIR}" )
+
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
@@ -314,6 +339,27 @@ if (BUILD_RTMESSAGE_SAMPLE_APP)
     add_dependencies(rtrouted_diag rtMessage)
     target_link_libraries(rtrouted_diag ${LIBRARY_LINKER_OPTIONS} rtMessage)
 endif (BUILD_RTMESSAGE_SAMPLE_APP)
+
+SET_TARGET_PROPERTIES (rtMessage PROPERTIES OUTPUT_NAME "rtMessage")
+
+SET (RTMESSAGE_INSTALLTARGETS rtMessage)
+
+INSTALL (TARGETS ${RTMESSAGE_INSTALLTARGETS} EXPORT rtMessage-targets
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+
+EXPORT (EXPORT rtMessage-targets
+    FILE "${CMAKE_CURRENT_BINARY_DIR}/rtMessage-targets.cmake"
+)
+
+INSTALL (EXPORT rtMessage-targets
+    FILE
+        rtMessage-targets.cmake
+    DESTINATION
+        "${CMAKE_INSTALL_CMAKEDIR}"
+)
 
 ADD_CUSTOM_TARGET(distclean COMMAND ${CMAKE_COMMAND} -E remove ${CMAKE_CURRENT_BINARY_DIR}/*.so dmcli sample_provider_* sample_super sample_req sample_res sample_send sample_recv rtrouted rtsend rtrouted_diag CMakeCache.txt)
 
