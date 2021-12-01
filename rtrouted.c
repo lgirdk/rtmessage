@@ -1675,6 +1675,7 @@ int main(int argc, char* argv[])
     rdk_logger_init("/etc/debug.ini");
 #endif
 
+  rtLog_SetOption(RT_USE_RDKLOGGER);
   rtLogSetLogHandler(NULL);
 
   // add internal route

@@ -43,10 +43,6 @@
 #define RT_LOGPREFIX "rt:"
 #endif
 
-#ifdef ENABLE_RDKLOGGER
-#include "rdk_debug.h"
-#endif
-
 #include <inttypes.h>
 
 #ifdef __cplusplus
