@@ -105,7 +105,7 @@ endif (OPENSSL_REQUIRED)
 if (BUILD_FOR_DESKTOP)
   message("Building for desktop")
   ExternalProject_Add(
-    cJSON
+    cjson
     GIT_REPOSITORY https://github.com/DaveGamble/cJSON.git
     GIT_TAG v1.6.0
     INSTALL_DIR ${CMAKE_CURRENT_BINARY_DIR}
@@ -118,10 +118,10 @@ if (BUILD_FOR_DESKTOP)
 
   include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_BINARY_DIR}/deps/src/cJSON)
+    ${CMAKE_CURRENT_BINARY_DIR}/deps/src)
   link_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_BINARY_DIR}/deps/src/cJSON
+    ${CMAKE_CURRENT_BINARY_DIR}/deps/src/cjson
     ${CMAKE_BINARY_DIR}
     ${LIBRARY_DIR})
 else()
@@ -176,10 +176,10 @@ if (BUILD_RTMESSAGE_LIB)
       local_benchmarking.c)
 
     if (ENABLE_RDKLOGGER)
-      add_dependencies(rtMessage cJSON rdklogger)
+      add_dependencies(rtMessage cjson rdklogger)
       target_link_libraries(rtMessage ${LIBRARY_LINKER_OPTIONS} -pthread -lcjson -llog4c -lrdkloggers)
     else ()
-      add_dependencies(rtMessage cJSON)
+      add_dependencies(rtMessage cjson)
       target_link_libraries(rtMessage ${LIBRARY_LINKER_OPTIONS} -pthread -lcjson)
     endif (ENABLE_RDKLOGGER)
 
@@ -219,7 +219,7 @@ if (BUILD_RTMESSAGE_ROUTED)
     message ("Building rtrouted")
     add_executable(rtrouted rtrouted.c rtRoutingTree.c)
     if (BUILD_FOR_DESKTOP)
-      add_dependencies(rtrouted cJSON)
+      add_dependencies(rtrouted cjson)
     endif(BUILD_FOR_DESKTOP)
     if (INCLUDE_BREAKPAD)
       add_dependencies(rtrouted ${BREAKPAD_PATH})
@@ -232,7 +232,7 @@ endif (BUILD_RTMESSAGE_ROUTED)
 if (BUILD_DMCLI)
   add_executable(dmcli dataProvider/dmcli.cpp)
   if (BUILD_FOR_DESKTOP)
-    add_dependencies(dmcli cJSON rtMessage dataProvider)
+    add_dependencies(dmcli cjson rtMessage dataProvider)
     add_definitions("-DDEFAULT_DATAMODELDIR=\"${CMAKE_CURRENT_SOURCE_DIR}/dataProvider/data\"")
   else()
     add_definitions("-DDEFAULT_DATAMODELDIR=\"${RDK_FSROOT_PATH}/etc/model\"")
@@ -264,7 +264,7 @@ if (BUILD_RTMESSAGE_SAMPLE_APP)
     # sample_super
     add_executable(sample_super sample_super.c)
     if (BUILD_FOR_DESKTOP)
-      add_dependencies(sample_super cJSON)
+      add_dependencies(sample_super cjson)
     endif (BUILD_FOR_DESKTOP)
     add_dependencies(sample_super rtMessage)
     target_link_libraries(sample_super ${LIBRARY_LINKER_OPTIONS} rtMessage ${PWD_LIBRARY})
@@ -272,7 +272,7 @@ if (BUILD_RTMESSAGE_SAMPLE_APP)
     # sample_send
     add_executable(sample_send sample_send.c)
     if (BUILD_FOR_DESKTOP)
-      add_dependencies(sample_send cJSON)
+      add_dependencies(sample_send cjson)
     endif (BUILD_FOR_DESKTOP)
     add_dependencies(sample_send rtMessage)
     target_link_libraries(sample_send ${LIBRARY_LINKER_OPTIONS} rtMessage)
@@ -280,7 +280,7 @@ if (BUILD_RTMESSAGE_SAMPLE_APP)
     # sample_recv
     add_executable(sample_recv sample_recv.c)
     if (BUILD_FOR_DESKTOP)
-      add_dependencies(sample_recv cJSON)
+      add_dependencies(sample_recv cjson)
     endif (BUILD_FOR_DESKTOP)
     add_dependencies(sample_send rtMessage)
     target_link_libraries(sample_recv ${LIBRARY_LINKER_OPTIONS} rtMessage)
@@ -288,7 +288,7 @@ if (BUILD_RTMESSAGE_SAMPLE_APP)
     # sample_req
     add_executable(sample_req sample_req.c)
     if (BUILD_FOR_DESKTOP)
-      add_dependencies(sample_req cJSON)
+      add_dependencies(sample_req cjson)
     endif (BUILD_FOR_DESKTOP)
     add_dependencies(sample_send rtMessage)
     target_link_libraries(sample_req ${LIBRARY_LINKER_OPTIONS} rtMessage)
@@ -296,7 +296,7 @@ if (BUILD_RTMESSAGE_SAMPLE_APP)
     # sample_res
     add_executable(sample_res sample_res.c)
     if (BUILD_FOR_DESKTOP)
-      add_dependencies(sample_res cJSON)
+      add_dependencies(sample_res cjson)
     endif (BUILD_FOR_DESKTOP)
     add_dependencies(sample_send rtMessage)
     target_link_libraries(sample_res ${LIBRARY_LINKER_OPTIONS} rtMessage)
@@ -304,7 +304,7 @@ if (BUILD_RTMESSAGE_SAMPLE_APP)
     # rtsend
     add_executable(rtsend rtsend.c)
     if (BUILD_FOR_DESKTOP)
-      add_dependencies(rtsend cJSON)
+      add_dependencies(rtsend cjson)
     endif (BUILD_FOR_DESKTOP)
     add_dependencies(rtsend rtMessage)
     target_link_libraries(rtsend ${LIBRARY_LINKER_OPTIONS} rtMessage ${PWD_LIBRARY})
@@ -324,5 +324,5 @@ install (TARGETS rtrouted rtMessage rtrouted_diag sample_super RUNTIME DESTINATI
 install (FILES rtMessage.h rtMessageHeader.h rtError.h rtConnection.h rtVector.h rtRetainable.h rtLog.h rtList.h rtTime.h rtAtomic.h rtm_discovery_api.h rtAdvisory.h DESTINATION "include/rtmessage")
 
 if (BUILD_FOR_DESKTOP)
-    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/deps/src/cJSON/libcjson.so ${CMAKE_CURRENT_BINARY_DIR}/deps/src/cJSON/libcjson.so.1 ${CMAKE_CURRENT_BINARY_DIR}/deps/src/cJSON/libcjson.so.1.6.0 DESTINATION lib)
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/deps/src/cjson/libcjson.so ${CMAKE_CURRENT_BINARY_DIR}/deps/src/cjson/libcjson.so.1 ${CMAKE_CURRENT_BINARY_DIR}/deps/src/cjson/libcjson.so.1.6.0 DESTINATION lib)
 endif (BUILD_FOR_DESKTOP)

@@ -33,7 +33,7 @@ option(BUILD_DM_SAMPLE_APP "BUILD_DM_SAMPLE_APP" ON)
 set(CMAKE_C_FLAGS "")
 
 ExternalProject_Add(
-  cJSON
+  cjson
   GIT_REPOSITORY https://github.com/DaveGamble/cJSON.git
   GIT_TAG v1.6.0
   INSTALL_DIR ${CMAKE_CURRENT_BINARY_DIR}
