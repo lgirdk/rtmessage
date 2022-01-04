@@ -1537,11 +1537,24 @@ rtRouted_AcceptClientConnection(rtListener* listener)
 static rtError
 rtRouted_BindListener(char const* socket_name, int no_delay)
 {
-  int ret;
+  int ret, n;
   rtError err;
   socklen_t socket_length;
   rtListener* listener;
-  int num_retries = 1;
+  unsigned int num_retries = 1;
+  int i = 0;
+  int indefinite_retry = 0;
+
+  /* Setting indefinite_retry variable only when there are morethan one socket fd in listeners */
+  for (i = 0, n = rtVector_Size(listeners); i < n; ++i)
+  {
+      rtListener* listener_history = (rtListener *) rtVector_At(listeners, i);
+      if (listener_history)
+      {
+        indefinite_retry = 1;
+        break;
+      }
+  }
 
   listener = (rtListener *) malloc(sizeof(rtListener));
   listener->fd = -1;
@@ -1569,27 +1582,34 @@ rtRouted_BindListener(char const* socket_name, int no_delay)
       setsockopt(listener->fd, SOL_TCP, TCP_NODELAY, &one, sizeof(one));
 
     setsockopt(listener->fd, SOL_SOCKET, SO_REUSEADDR, (char *)&one, sizeof(one));
-    num_retries = 18; //Special handling for TCP sockets: keep retrying for 3 minutes, 10s after each failure. This helps if networking is slow to come up.
-  }
-
-  while(0 != num_retries)
-  {
-    ret = bind(listener->fd, (struct sockaddr *)&listener->local_endpoint, socket_length);
-    if (ret == -1)
+    if(indefinite_retry == 1)
     {
-      rtError err = rtErrorFromErrno(errno);
-      rtLog_Warn("failed to bind socket. %s.  num_retries=%d", rtStrError(err), num_retries);
-      if(0 == --num_retries)
-      {
-        rtLog_Warn("exiting app on bind socket failure");
-        exit(1);
-      }
-      else
-        sleep(10);
+      /* assigning maximum value of unsigned integer(0xFFFFFFFF - 4294967295) to num_retries */
+      num_retries = 0;
+      num_retries = ~num_retries;
     }
     else
-      break;
+      num_retries = 18; //Special handling for TCP sockets: keep retrying for 3 minutes, 10s after each failure. This helps if networking is slow to come up.
   }
+
+    while(0 != num_retries)
+    {
+      ret = bind(listener->fd, (struct sockaddr *)&listener->local_endpoint, socket_length);
+      if (ret == -1)
+      {
+        rtError err = rtErrorFromErrno(errno);
+        rtLog_Warn("failed to bind socket. %s.  num_retries=%u", rtStrError(err), num_retries);
+        if(0 == --num_retries)
+        {
+          rtLog_Warn("exiting app on bind socket failure");
+          exit(1);
+        }
+        else
+          sleep(10);
+      }
+      else
+        break;
+    }
 
   ret = listen(listener->fd, 4);
   if (ret == -1)
@@ -1632,6 +1652,7 @@ int main(int argc, char* argv[])
   int ret;
   char const* socket_name[RTMSG_MAX_LISTENING_SOCKETS];
   char const* config_file;
+  char const* temp;
   int num_listeners = 0;
   rtRouteEntry* route;
 
@@ -1747,6 +1768,17 @@ int main(int argc, char* argv[])
         break;
       default:
         fprintf(stderr, "?? getopt returned character code 0%o ??\n", c);
+    }
+  }
+  /* Array manipulation for making unix socket as the first element of the socket_name array */
+  for (i = 0; (num_listeners > 0 && i < num_listeners); i++)
+  {
+    if(!strncmp(socket_name[i], "unix", 4))
+    {
+      temp = socket_name[i];
+      socket_name[i] = socket_name[0];
+      socket_name[0] = temp;
+      break;
     }
   }
 
