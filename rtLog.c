@@ -178,8 +178,6 @@ rtLoggerSelection rtLog_GetOption()
 #define RT_LOG_BUFFER_SIZE    1024
 void rtLogPrintf(rtLogLevel level, const char* file, int line, const char* format, ...)
 {
-  if (level < sLevel)
-    return;
 
   size_t n = 0;
   char buff[RT_LOG_BUFFER_SIZE] = {0};
@@ -210,6 +208,9 @@ void rtLogPrintf(rtLogLevel level, const char* file, int line, const char* forma
   {
     struct timeval tv;
     struct tm* lt;
+
+    if (level < sLevel)
+      return;
     gettimeofday(&tv, NULL);
     lt = localtime(&tv.tv_sec);
 
