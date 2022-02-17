@@ -4,7 +4,7 @@
   "is_list" : false,
   "properties":
   [
-    {"name": "xconfCheckNow", "type": "boolean", "optional": false, "writable": true, "version": "2.0"}
+    {"name": "xconfCheckNow", "type": "bool", "optional": false, "writable": true, "version": "2.0"}
   ]
 }
 

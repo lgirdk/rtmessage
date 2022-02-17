@@ -89,7 +89,7 @@ public:
     rtMessage_SetMessage(req, "params", item);
     rtMessage res;
 
-    rtError err = rtConnection_SendRequest(m_con, req, topic.c_str(), &res, 2000);
+    rtError err = rtConnection_SendRequest(m_con, req, topic.c_str(), &res, 5000);
 #if 0
     if ((err == RT_OK) && rtLog_IsLevelEnabled(RT_LOG_DEBUG))
     {

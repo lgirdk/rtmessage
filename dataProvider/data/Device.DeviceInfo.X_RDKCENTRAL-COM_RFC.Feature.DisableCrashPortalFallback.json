@@ -4,6 +4,6 @@
   "is_list" : false,
   "properties":
     [
-        {"name": "Enable", "type": "boolean", "optional": false, "writable": true, "version": "2.0"}
+        {"name": "Enable", "type": "bool", "optional": false, "writable": true, "version": "2.0"}
     ]
 }

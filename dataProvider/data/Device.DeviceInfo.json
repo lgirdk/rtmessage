@@ -12,18 +12,10 @@
       {"name": "X_RDKCENTRAL-COM_MAC", "type": "string", "optional": false, "writable": false, "version": "2.0"},
       {"name": "X_RDKCENTRAL-COM_FWVersion", "type": "string", "optional": false, "writable": false, "version": "2.0"},
       {"name": "X_RDKCENTRAL-COM_SSID", "type": "string", "optional": false, "writable": false, "version": "2.0"},
-      {"name": "X_RDKCENTRAL-COM_StreamType", "type": "string", "optional": false, "writable": false, "version": "2.0"},
-      {"name": "X_RDKCENTRAL-COM_StreamProfile", "type": "string", "optional": false, "writable": false, "version": "2.0"},
-      {"name": "X_RDKCENTRAL-COM_StreamLevel", "type": "string", "optional": false, "writable": false, "version": "2.0"},
-      {"name": "X_RDKCENTRAL-COM_StreamResolution", "type": "string", "optional": false, "writable": false, "version": "2.0"},
-      {"name": "X_RDKCENTRAL-COM_StreamBitRate", "type": "string", "optional": false, "writable": false, "version": "2.0"},
-      {"name": "X_RDKCENTRAL-COM_StreamBitRateType", "type": "string", "optional": false, "writable": false, "version": "2.0"},
-      {"name": "X_RDKCENTRAL-COM_StreamQualityLevel", "type": "string", "optional": false, "writable": false, "version": "2.0"},
-      {"name": "X_RDKCENTRAL-COM_StreamFrameRate", "type": "string", "optional": false, "writable": false, "version": "2.0"},
-      {"name": "X_RDKCENTRAL-COM_StreamGOVlength", "type": "string", "optional": false, "writable": false, "version": "2.0"},
       {"name": "X_RDKCENTRAL-COM_SystemTime", "type": "string", "optional": false, "writable": false, "version": "2.0"},
+      {"name": "X_RDKCENTRAL-COM_UpstreamBandwidth", "type": "string", "optional": false, "writable": false, "version": "2.0"},
       {"name": "X_RDKCENTRAL-COM_LastRebootReason", "type": "string", "optional": false, "writable": true, "version": "2.0"},
-      {"name": "X_RDKCENTRAL-COM_LastRebootCounter", "type": "string", "optional": false, "writable": false, "version": "2.0"},
-      {"name": "X_RDKCENTRAL-COM_IMAGENAME", "type": "string", "optional": false, "writable": false, "version": "2.0"}
+      {"name": "X_RDKCENTRAL-COM_IMAGENAME", "type": "string", "optional": false, "writable": false, "version": "2.0"},
+      {"name": "X_RDK_FirmwareName", "type": "string", "optional": false, "writable": false, "version": "2.0"}
     ]
 }

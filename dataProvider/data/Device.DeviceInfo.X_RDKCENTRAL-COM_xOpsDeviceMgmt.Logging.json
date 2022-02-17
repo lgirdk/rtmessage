@@ -4,7 +4,7 @@
   "is_list" : false,
   "properties":
   [
-    {"name": "xOpsDMUploadLogsNow", "type": "boolean", "optional": false, "writable": true, "version": "2.0"},
+    {"name": "xOpsDMUploadLogsNow", "type": "bool", "optional": false, "writable": true, "version": "2.0"},
     {"name": "xOpsDMLogsUploadStatus", "type": "string", "optional": false, "writable": false, "version": "2.0"}
   ]
 }
