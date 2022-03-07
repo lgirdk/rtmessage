@@ -193,6 +193,30 @@ rtRouted_FileExists(char const* s)
   return ret == 0 ? 1 : 0;
 }
 
+static void
+rtRouted_PrintClientInfo(rtConnectedClient* clnt)
+{
+  size_t i;
+
+  if(NULL == clnt)
+  {
+    rtLog_Warn("client is NULL");
+    return;
+  }
+
+  for (i = 0; i < rtVector_Size(routes);)
+  {
+    rtRouteEntry* route = (rtRouteEntry *) rtVector_At(routes, i);
+    if (route->subscription && route->subscription->client == clnt)
+    {
+      rtLog_Warn("client identity:%s name:%s", clnt->ident,route->expression);
+      break;
+    }
+    else
+      i++;
+  }
+}
+
 static rtError
 rtRouted_ReadTextFile(char const* fname, char** content)
 {
@@ -1417,6 +1441,7 @@ rtConnectedClient_Read(rtConnectedClient* clnt)
   {
     rtError e = rtErrorFromErrno(errno);
     rtLog_Warn("read:%s", rtStrError(e));
+    rtRouted_PrintClientInfo(clnt);
     return e;
   }
 
