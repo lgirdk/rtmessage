@@ -30,6 +30,7 @@
 #include "rtRetainable.h"
 #include "rtTime.h"
 #include "rtSemaphore.h"
+#include "rtMemory.h"
 #include <dlfcn.h>
 
 #if defined(__GNUC__)                                                          \
@@ -168,7 +169,9 @@ static inline bool rtConnection_IsSecure(rtConnection con)
 
 static void rtMessageInfo_Init(rtMessageInfo** pim)
 {
-    (*pim) = malloc(sizeof(struct _rtMessageInfo));
+    (*pim) = rt_try_malloc(sizeof(struct _rtMessageInfo));
+    if(!(*pim))
+      return;
     (*pim)->retainable.refCount = 0;
     rtMessageHeader_Init(&(*pim)->header);
     (*pim)->userData = NULL;
@@ -519,7 +522,7 @@ rtConnection_CreateInternal(rtConnection* con, char const* application_name, cha
   int i = 0;
   rtError err = RT_OK;
 
-  rtConnection c = (rtConnection) malloc(sizeof(struct _rtConnection));
+  rtConnection c = (rtConnection) rt_try_malloc(sizeof(struct _rtConnection));
   if (!c)
     return rtErrorFromErrno(ENOMEM);
 
@@ -545,8 +548,12 @@ rtConnection_CreateInternal(rtConnection* con, char const* application_name, cha
     c->listeners[i].subscription_id = 0;
   }
   c->send_buffer_in_use = 0;
-  c->send_buffer = (uint8_t *) malloc(RTMSG_SEND_BUFFER_SIZE);
-  c->recv_buffer = (uint8_t *) malloc(RTMSG_SEND_BUFFER_SIZE);
+  c->send_buffer = (uint8_t *) rt_try_malloc(RTMSG_SEND_BUFFER_SIZE);
+  if(!c->send_buffer)
+    return rtErrorFromErrno(ENOMEM);
+  c->recv_buffer = (uint8_t *) rt_try_malloc(RTMSG_SEND_BUFFER_SIZE);
+  if(!c->recv_buffer)
+    return rtErrorFromErrno(ENOMEM);
   c->recv_buffer_capacity = RTMSG_SEND_BUFFER_SIZE;
   c->sequence_number = 1;
 #ifdef C11_ATOMICS_SUPPORTED
@@ -666,9 +673,14 @@ rtConnection_CreateWithConfig(rtConnection* con, rtMessage const conf)
         return err;
       }
 
-      (*con)->encryption_buffer = malloc(RTMSG_SEND_BUFFER_SIZE);
+      (*con)->encryption_buffer = rt_try_malloc(RTMSG_SEND_BUFFER_SIZE);
+      if(!(*con)->encryption_buffer)
+        return rtErrorFromErrno(ENOMEM);
       memset((*con)->encryption_buffer, 0, RTMSG_SEND_BUFFER_SIZE);
-      (*con)->decryption_buffer = malloc(RTMSG_SEND_BUFFER_SIZE);
+
+      (*con)->decryption_buffer = rt_try_malloc(RTMSG_SEND_BUFFER_SIZE);
+      if(!(*con)->decryption_buffer)
+        return rtErrorFromErrno(ENOMEM);
       memset((*con)->decryption_buffer, 0, RTMSG_SEND_BUFFER_SIZE);
 
     }
@@ -922,7 +934,9 @@ rtConnection_SendBinaryRequest(rtConnection con, uint8_t const* pReq, uint32_t n
       {
         /*alloc on heap b/c data will be freed by rtMessageInfo_Release*/
         *nRes = mi->dataLength;
-        *pRes = malloc(mi->dataLength);
+        *pRes = rt_try_malloc(mi->dataLength);
+        if(!*pRes)
+          return rtErrorFromErrno(ENOMEM);
         memcpy(*pRes, mi->data, mi->dataLength);
       }
     }
@@ -1409,6 +1423,8 @@ rtConnection_Read(rtConnection con, int32_t timeout)
   max_attempts = 4;
 
   rtMessageInfo_Init(&msginfo);
+  if(!msginfo)
+    return rtErrorFromErrno(ENOMEM);
 
   if (!con)
     return rtErrorFromErrno(EINVAL);
@@ -1458,7 +1474,9 @@ rtConnection_Read(rtConnection con, int32_t timeout)
     {
       if(msginfo->dataCapacity < msginfo->header.payload_length + 1)
       {
-        msginfo->data = (uint8_t *)malloc(msginfo->header.payload_length + 1);
+        msginfo->data = (uint8_t *)rt_try_malloc(msginfo->header.payload_length + 1);
+        if(!msginfo->data)
+          return rtErrorFromErrno(ENOMEM);        
         msginfo->dataCapacity = msginfo->header.payload_length + 1;
       }
 
@@ -1575,7 +1593,6 @@ rtConnection_Read(rtConnection con, int32_t timeout)
 #ifdef WITH_SPAKE2
 void check_router(rtConnection con)
 {
-  rtError err;
   char remote_addr[128] = {0};
   uint16_t remote_port = 0;
   int x;
@@ -1584,7 +1601,7 @@ void check_router(rtConnection con)
   int (*fptr)(const char *format, ...);
 
   if (!con)
-    return rtErrorFromErrno(EINVAL);
+    return;
 
   rtSocketStorage_ToString(&con->remote_endpoint, remote_addr, sizeof(remote_addr), &remote_port);
   rtLog_Info("remote addr is %s \n",remote_addr);
@@ -1607,7 +1624,7 @@ void check_router(rtConnection con)
     if(x != 0)
     {
       rtLog_Info("reconnecting from reader thread \n");
-      err = rtConnection_ConnectAndRegister(con, &con->reader_reconnect_time);
+      rtConnection_ConnectAndRegister(con, &con->reader_reconnect_time);
     }
     dlclose(handle);
    }

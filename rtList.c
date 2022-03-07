@@ -20,6 +20,7 @@
 */
 #include "rtList.h"
 #include "rtLog.h"
+#include "rtMemory.h"
 #include <errno.h>
 #include <stdlib.h>
 #include <memory.h>
@@ -52,8 +53,9 @@ static rtListItem rtList_GetFreeItem(rtList list)
   }
   else
   {
-    item = (rtListItem)malloc(sizeof(struct _rtListItem));
-    item->data = NULL;
+    item = (rtListItem)rt_try_malloc(sizeof(struct _rtListItem));
+    if(item)
+      item->data = NULL;
   }
   return item;
 }
@@ -85,7 +87,7 @@ rtError rtList_Create(rtList* plist)
   rtList list;
   RT_CHECK_INVALID_ARG(plist);
   *plist = NULL;
-  list = (rtList)malloc(sizeof(struct _rtList));
+  list = (rtList)rt_try_malloc(sizeof(struct _rtList));
   RT_CHECK_NO_MEM(list);
   memset(list, 0, sizeof(struct _rtList));
   *plist = list;
@@ -584,11 +586,11 @@ int main(int argc, char* argv[])
   /*exercise reusability*/
   printf("testing reusability\n"); 
   rtList_Create(&list);
-  sdata = malloc(10); strncpy(sdata, "one", 10);
+  sdata = rt_malloc(10); strncpy(sdata, "one", 10);
   rtList_PushBack(list, sdata, &items[0]);
-  sdata = malloc(10); strncpy(sdata, "two", 10);
+  sdata = rt_malloc(10); strncpy(sdata, "two", 10);
   rtList_PushBack(list, sdata, &items[1]);
-  sdata = malloc(10); strncpy(sdata, "three", 10);
+  sdata = rt_malloc(10); strncpy(sdata, "three", 10);
   rtList_PushBack(list, sdata, &items[2]);
   printf("list should contain one, two, three. free list empty\n");
   printListString(list);
@@ -622,7 +624,7 @@ int main(int argc, char* argv[])
     else
     {
       printf("got data null\n");
-      data = malloc(10);
+      data = rt_malloc(10);
       rtListItem_SetData(items[i], data);
     }
     snprintf(buff, 10, "item %d", i);

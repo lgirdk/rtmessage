@@ -22,6 +22,7 @@
 #include "rtError.h"
 #include "rtLog.h"
 #include "rtBase64.h"
+#include "rtMemory.h"
 #include <errno.h>
 #include <string.h>
 #include <assert.h>
@@ -186,7 +187,9 @@ rtCipher_CreateCipherSpake2Plus(rtCipher** cipher, rtMessage const opts)
   if(err != RT_OK)
     return err;
 
-  (*cipher) = malloc(sizeof(struct _rtCipher));
+  (*cipher) = rt_try_malloc(sizeof(struct _rtCipher));
+  if(!(*cipher))
+    return rtErrorFromErrno(ENOMEM);
   (*cipher)->spake2_ctx = spake2_ctx;
   (*cipher)->is_server = false;
   rtMessage_GetBool(opts, RT_CIPHER_SPAKE2_IS_SERVER, &(*cipher)->is_server);
@@ -322,9 +325,9 @@ rtCipher_RunKeyExchangeClient(rtCipher* cipher, rtConnection con)
     goto on_err;
   }
 
-  if (NULL == (pA =(uint8_t *)malloc(pA_len)))
+  if (NULL == (pA =(uint8_t *)rt_try_malloc(pA_len)))
   {
-    rtLog_Error("spake2+ failed to allocate %lu bytes", pA_len);
+    rtLog_Error("spake2+ failed to allocate %zu bytes", pA_len);
     goto on_err;
   }
 
@@ -520,7 +523,12 @@ rtCipher_RunKeyExchangeServer(rtCipher* cipher, rtMessage request, rtMessage* re
       goto on_err;
     }
 
-    pB = malloc(pB_len);
+    pB = rt_try_malloc(pB_len);
+    if(!pB)
+    {
+      rtLog_Error("spake2+ failed to allocate %zu bytes", pB_len);
+      goto on_err;
+    }
 
     rtLog_Info("spake2+ get pB value");
     ret = spake2plus_get_own_pA_or_pB(pB, &pB_len, cipher->spake2_ctx);
@@ -618,7 +626,12 @@ rtCipher_RunKeyExchangeServer(rtCipher* cipher, rtMessage request, rtMessage* re
 
     if(key)
     {
-      *key = malloc(RT_CIPHER_MAX_KEY_SIZE);/* it fails if Ke_len is used for size */
+      *key = rt_try_malloc(RT_CIPHER_MAX_KEY_SIZE);/* it fails if Ke_len is used for size */
+      if(!(*key))
+      {
+        rtLog_Error("spake2+ failed to allocate %d bytes", RT_CIPHER_MAX_KEY_SIZE);
+        goto on_err;
+      }      
       memset(*key, 0, RT_CIPHER_MAX_KEY_SIZE);
       memcpy(*key, cipher->key, Ke_len);
     }
@@ -689,9 +702,9 @@ rtCipher_RunKeyExchangeServer(rtCipher* cipher, int sock, uint8_t** key)
     return RT_FAIL;
   }
 
-  if (NULL == (pB = malloc(pB_len)))
+  if (NULL == (pB = rt_try_malloc(pB_len)))
   {
-    rtLog_Error("spake2+ failed to allocate %lu bytes", pB_len);
+    rtLog_Error("spake2+ failed to allocate %zu bytes", pB_len);
     return RT_FAIL;
   }
 
@@ -764,7 +777,7 @@ rtCipher_RunKeyExchangeServer(rtCipher* cipher, int sock, uint8_t** key)
 
   if(key)
   {
-    *key = malloc(Ke_len);
+    *key = rt_try_malloc(Ke_len);
     memcpy(*key, cipher->key, Ke_len);
   }
 
@@ -817,9 +830,9 @@ rtCipher_RunKeyExchangeClient(rtCipher* cipher, int sock, uint8_t** key)
     goto on_err;
   }
 
-  if (NULL == (pA =(uint8_t *)malloc(pA_len)))
+  if (NULL == (pA =(uint8_t *)rt_try_malloc(pA_len)))
   {
-    rtLog_Error("spake2+ failed to allocate %lu bytes", pA_len);
+    rtLog_Error("spake2+ failed to allocate %zu bytes", pA_len);
     goto on_err;
   }
 
@@ -893,7 +906,7 @@ rtCipher_RunKeyExchangeClient(rtCipher* cipher, int sock, uint8_t** key)
 
   if(key)
   {
-    *key = malloc(Ke_len);
+    *key = rt_try_malloc(Ke_len);
     memcpy(*key, cipher->key, Ke_len);
   }
 

@@ -18,12 +18,14 @@
 # limitations under the License.
 ##########################################################################
 */
+
+#include "rtBase64.h"
+#include "rtLog.h"
+#include "rtMemory.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdbool.h>
-#include "rtLog.h"
-#include "rtBase64.h"
 
 static const char base64_lookup_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -73,7 +75,7 @@ rtError rtBase64_encode(const void * in, const unsigned int in_size, unsigned ch
     if(0 != last_group_len)
         *out_size += 4;
 
-    unsigned char *write_buff = (unsigned char *) malloc(*out_size);
+    unsigned char *write_buff = (unsigned char *) rt_try_malloc(*out_size);
     if(NULL == write_buff)
     {
         rtLog_Error("Couldn't allocate memory for output.");
@@ -155,7 +157,7 @@ rtError rtBase64_decode(const unsigned char * in, const unsigned int in_size,  v
     }
     *out_size -= num_padding_bytes;
 
-    unsigned char *write_buff = (unsigned char *) malloc(*out_size);
+    unsigned char *write_buff = (unsigned char *) rt_try_malloc(*out_size);
     if(NULL == write_buff)
     {
         rtLog_Fatal("Couldn't allocate memory for output.");

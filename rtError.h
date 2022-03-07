@@ -26,6 +26,7 @@
 #define RT_ERROR_H
 
 #include <stdint.h>
+#include <errno.h>
 
 #ifdef RT_DEBUG
 #include <assert.h>

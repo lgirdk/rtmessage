@@ -23,7 +23,7 @@
 #include "rtMessage.h"
 #include "rtBase64.h"
 #include "rtAtomic.h"
-
+#include "rtMemory.h"
 #include <cjson/cJSON.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -45,7 +45,9 @@ struct _rtMessage
 rtError
 rtMessage_Create(rtMessage* message)
 {
-  *message = (rtMessage) malloc(sizeof(struct _rtMessage));
+  *message = (rtMessage) rt_try_malloc(sizeof(struct _rtMessage));
+  if(!*message)
+    return rtErrorFromErrno(ENOMEM);
   if (message)
   {
     (*message)->count = 0;
@@ -65,15 +67,13 @@ rtMessage_Create(rtMessage* message)
 rtError
 rtMessage_Clone(rtMessage const message, rtMessage* copy)
 {
-  *copy = (rtMessage) malloc(sizeof(struct _rtMessage));
-  if (copy)
-  {
-    (*copy)->count = 0;
-    (*copy)->json = cJSON_Duplicate(message->json, 1);
-    rt_atomic_fetch_add(&(*copy)->count, 1);
-    return RT_OK;
-  }
-  return RT_FAIL;
+  *copy = (rtMessage) rt_try_malloc(sizeof(struct _rtMessage));
+  if (!*copy)
+    return rtErrorFromErrno(ENOMEM);
+  (*copy)->count = 0;
+  (*copy)->json = cJSON_Duplicate(message->json, 1);
+  rt_atomic_fetch_add(&(*copy)->count, 1);
+  return RT_OK;
 }
 
 /* Allocates storage and initializes it as new message
@@ -99,22 +99,20 @@ rtMessage_FromBytes(rtMessage* message, uint8_t const* bytes, int n)
   printf("\n\n");
   #endif
 
-  *message = (rtMessage) malloc(sizeof(struct _rtMessage));
-  if (message)
+  *message = (rtMessage) rt_try_malloc(sizeof(struct _rtMessage));
+  if(!*message)
+    return rtErrorFromErrno(ENOMEM);
+  (*message)->json = cJSON_Parse((char *) bytes);
+  if (!(*message)->json)
   {
-    (*message)->json = cJSON_Parse((char *) bytes);
-    if (!(*message)->json)
-    {
-      free(*message);
-      *message = NULL;
-      return RT_FAIL;
-    }
-
-    (*message)->count = 0;
-    rt_atomic_fetch_add(&(*message)->count, 1);
-    return RT_OK;
+    free(*message);
+    *message = NULL;
+    return RT_FAIL;
   }
-  return RT_FAIL;
+
+  (*message)->count = 0;
+  rt_atomic_fetch_add(&(*message)->count, 1);
+  return RT_OK;
 }
 
 /**
@@ -390,19 +388,16 @@ rtMessage_GetDouble(rtMessage const  message, char const* name,double* value)
 rtError
 rtMessage_GetMessage(rtMessage const message, char const* name, rtMessage* clone)
 {
-  *clone = (rtMessage) malloc(sizeof(struct _rtMessage));
-
   cJSON* p = cJSON_GetObjectItem(message->json, name);
-  if (p)
-  {
-     (*clone)->json = cJSON_Duplicate(p, cJSON_True);
-     (*clone)->count = 0;
-     rt_atomic_fetch_add(&(*clone)->count, 1);
-     return RT_OK;
-  }
-  
-  free(clone);
-  return RT_FAIL;
+  if (!p)
+    return RT_PROPERTY_NOT_FOUND;
+  *clone = (rtMessage) rt_try_malloc(sizeof(struct _rtMessage));
+  if(!*clone)
+    return rtErrorFromErrno(ENOMEM);
+  (*clone)->json = cJSON_Duplicate(p, cJSON_True);
+  (*clone)->count = 0;
+  rt_atomic_fetch_add(&(*clone)->count, 1);
+  return RT_OK;
 }
 
 /**
@@ -575,16 +570,13 @@ rtMessage_GetMessageItem(rtMessage const m, char const* name, int32_t idx, rtMes
     return RT_PROPERTY_NOT_FOUND;
   if (idx >= cJSON_GetArraySize(obj))
     return RT_FAIL;
-
-  *msg = (rtMessage) malloc(sizeof(struct _rtMessage));
-  if (msg)
-  {
-    (*msg)->json = cJSON_Duplicate(cJSON_GetArrayItem(obj, idx), 1);
-    (*msg)->count = 0;
-    rt_atomic_fetch_add(&(*msg)->count, 1);
-    return RT_OK;
-  }
-  return RT_FAIL;
+  *msg = (rtMessage) rt_try_malloc(sizeof(struct _rtMessage));
+  if(!*msg)
+    return rtErrorFromErrno(ENOMEM);  
+  (*msg)->json = cJSON_Duplicate(cJSON_GetArrayItem(obj, idx), 1);
+  (*msg)->count = 0;
+  rt_atomic_fetch_add(&(*msg)->count, 1);
+  return RT_OK;
 }
 
 /**

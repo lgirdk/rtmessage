@@ -20,14 +20,15 @@
 */
 #define _GNU_SOURCE
 
+#include "rtRoutingTree.h"
+#include "rtLog.h"
+#include "rtList.h"
+#include "rtMemory.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <ctype.h>
-#include "rtLog.h"
-#include "rtList.h"
-#include "rtRoutingTree.h"
 
 typedef struct Token
 {
@@ -54,12 +55,12 @@ static int rtList_ComparePointer(const void *left, const void *right)
 
 static rtTreeTopic* createTreeTopic(const char* name, rtTreeTopic* parent)
 {
-    rtTreeTopic* treeTopic = calloc(1, sizeof(struct rtTreeTopic));
+    rtTreeTopic* treeTopic = rt_calloc(1, sizeof(struct rtTreeTopic));
     treeTopic->parent = parent;
     treeTopic->name = strdup(name);
     if(parent->fullName)
     {
-        treeTopic->fullName = malloc(strlen(parent->fullName) + 1 + strlen(name) + 1);
+        treeTopic->fullName = rt_malloc(strlen(parent->fullName) + 1 + strlen(name) + 1);
         sprintf(treeTopic->fullName, "%s.%s", parent->fullName, name);
     }
     else
@@ -419,8 +420,8 @@ static void logTreeTopic(rtTreeTopic* topic, int depth)
 void rtRoutingTree_Create(rtRoutingTree* rt)
 {
     rtLog_Debug("%s", __FUNCTION__);
-    *rt = malloc(sizeof(struct _rtRoutingTree));
-    (*rt)->topicRoot = calloc(1, sizeof(struct rtTreeTopic));/*root's name and fullName stay NULL*/
+    *rt = rt_malloc(sizeof(struct _rtRoutingTree));
+    (*rt)->topicRoot = rt_calloc(1, sizeof(struct rtTreeTopic));/*root's name and fullName stay NULL*/
     rtList_Create(&(*rt)->routeList);
 }
 
@@ -448,7 +449,7 @@ rtError rtRoutingTree_AddTopicRoute(rtRoutingTree rt, const char* topicPath, con
     route = getTreeRoute(rt, routeData, NULL);
     if(!route)
     {
-        route = malloc(sizeof(rtTreeRoute));
+        route = rt_malloc(sizeof(rtTreeRoute));
         route->route = (void*)routeData;
         rtList_Create(&route->topicList);
         rtList_PushBack(rt->routeList, route, NULL);

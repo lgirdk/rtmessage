@@ -1,6 +1,7 @@
 #include "rtSemaphore.h"
 #include "rtLog.h"
 #include "rtError.h"
+#include "rtMemory.h"
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,7 +30,9 @@ rtError rtSemaphore_Create(rtSemaphore* sem)
   int rc = 0;
   pthread_mutexattr_t mattrib;
   pthread_condattr_t cattrib;
-  *sem = malloc(sizeof(struct _rtSemaphore));
+  *sem = rt_try_malloc(sizeof(struct _rtSemaphore));
+  if(!*sem)
+    return rtErrorFromErrno(ENOMEM);
   (*sem)->v = 0;
   ERROR_CHECK(pthread_mutexattr_init(&mattrib));
   ERROR_CHECK(pthread_mutexattr_settype(&mattrib, PTHREAD_MUTEX_ERRORCHECK));

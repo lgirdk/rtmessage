@@ -20,7 +20,7 @@
 */
 #include "rtBuffer.h"
 #include "rtEncoder.h"
-
+#include "rtMemory.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -40,7 +40,9 @@ struct _rtBuffer
 rtError
 rtBuffer_Create(rtBuffer* buff)
 {
-  *buff = (rtBuffer) malloc(sizeof(struct _rtBuffer));
+  *buff = (rtBuffer) rt_try_malloc(sizeof(struct _rtBuffer));
+  if(!*buff)
+    return return rtErrorFromErrno(ENOMEM);
   (*buff)->data = NULL;
   (*buff)->len = 0;
   (*buff)->refcount = 1;
@@ -54,7 +56,9 @@ rtBuffer_CreateFromBytes(rtBuffer* buff, uint8_t* b, int n)
   if (err != RT_OK)
     return err;
 
-  (*buff)->data = (uint8_t *) malloc(sizeof(uint8_t) * n);
+  (*buff)->data = (uint8_t *) rt_try_malloc(sizeof(uint8_t) * n);
+  if(!(*buff)->data)
+    return rtErrorFromErrno(ENOMEM);
   memcpy((*buff)->data, b, n);
   return RT_OK;
 }

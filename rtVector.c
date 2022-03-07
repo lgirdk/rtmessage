@@ -19,7 +19,7 @@
 ##########################################################################
 */
 #include "rtVector.h"
-
+#include "rtMemory.h"
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,7 +36,7 @@ struct _rtVector
 rtError
 rtVector_Create(rtVector* v)
 {
-  (*v) = (struct _rtVector *) malloc(sizeof(struct _rtVector));
+  (*v) = (struct _rtVector *) rt_try_malloc(sizeof(struct _rtVector));
   if (!(*v))
     return rtErrorFromErrno(ENOMEM);
   (*v)->data = NULL;
@@ -73,12 +73,12 @@ rtVector_PushBack(rtVector v, void* item)
 
   if (!v->data)
   {
-    v->data = calloc(RTVECT_BLOCKSIZE, sizeof(void *));
+    v->data = rt_try_calloc(RTVECT_BLOCKSIZE, sizeof(void *));
     v->capacity = RTVECT_BLOCKSIZE;
   }
   else if (v->count + 1 >= v->capacity)
   {
-    v->data = realloc(v->data, (v->capacity + RTVECT_BLOCKSIZE) * sizeof(void *));
+    v->data = rt_try_realloc(v->data, (v->capacity + RTVECT_BLOCKSIZE) * sizeof(void *));
     v->capacity += RTVECT_BLOCKSIZE;
   }
 
@@ -103,6 +103,9 @@ rtVector_RemoveItem(rtVector v, void* item, rtVector_Cleanup destroyer)
     }
   }
 
+  if(i == v->count)
+    return RT_FAIL;
+
   while (i < v->count)
   {
     v->data[i] = v->data[i+1];
@@ -123,20 +126,34 @@ rtVector_RemoveItem(rtVector v, void* item, rtVector_Cleanup destroyer)
 rtError 
 rtVector_RemoveItemByCompare(rtVector v, const void* comparison, rtVector_Compare compare, rtVector_Cleanup destroyer)
 {
-  size_t i = 0;
-
-  while(i < v->count)
+  size_t i;
+  for (i = 0; i < v->count; ++i)
   {
     if (compare(v->data[i], comparison) == 0)
     {
-        rtVector_RemoveItem(v, v->data[i], destroyer);
-        /*no i++ needed because we are at the next one after rtVector_RemoveItem returns*/
-    }
-    else
-    {
-        i++;
+      if (destroyer)
+        destroyer(v->data[i]);
+      break;
     }
   }
+
+  if(i == v->count)
+    return RT_FAIL;
+    
+  while (i < v->count)
+  {
+    v->data[i] = v->data[i+1];
+    i++;
+  }
+
+  v->count -= 1;
+
+  while (i < v->capacity)
+  {
+    v->data[i] = NULL;
+    i++;
+  }
+
   return RT_OK;
 }
 

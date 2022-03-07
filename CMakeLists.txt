@@ -198,6 +198,9 @@ if (BUILD_RTMESSAGE_LIB)
       rtSemaphore.c
       rtRetainable.c
       rtBase64.c
+      rtThreadPool.c
+      rtHashMap.c
+      rtMemory.c
       local_benchmarking.c)
 
     if (ENABLE_RDKLOGGER)
@@ -367,7 +370,24 @@ install (TARGETS LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 install (TARGETS ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
 
 install (TARGETS rtrouted rtMessage rtrouted_diag sample_super RUNTIME DESTINATION bin LIBRARY DESTINATION lib)
-install (FILES rtMessage.h rtMessageHeader.h rtError.h rtConnection.h rtVector.h rtRetainable.h rtLog.h rtList.h rtTime.h rtAtomic.h rtm_discovery_api.h rtAdvisory.h DESTINATION "include/rtmessage")
+install (
+  FILES
+  rtMessage.h
+  rtMessageHeader.h
+  rtError.h
+  rtConnection.h
+  rtVector.h
+  rtRetainable.h
+  rtLog.h
+  rtList.h
+  rtTime.h
+  rtAtomic.h
+  rtAdvisory.h
+  rtThreadPool.h
+  rtHashMap.h
+  rtMemory.h
+  rtm_discovery_api.h
+  DESTINATION "include/rtmessage")
 
 if (BUILD_FOR_DESKTOP)
     install(FILES ${CMAKE_CURRENT_BINARY_DIR}/deps/src/cjson/libcjson.so ${CMAKE_CURRENT_BINARY_DIR}/deps/src/cjson/libcjson.so.1 ${CMAKE_CURRENT_BINARY_DIR}/deps/src/cjson/libcjson.so.1.6.0 DESTINATION lib)

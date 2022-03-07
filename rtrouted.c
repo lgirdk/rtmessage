@@ -31,6 +31,10 @@
 #include "rtConnection.h"
 #include "rtAdvisory.h"
 #include "rtrouter_diag.h"
+#include "rtRoutingTree.h"
+#include "rtMemory.h"
+#include "rtm_discovery_api.h"
+#include "local_benchmarking.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <getopt.h>
@@ -48,9 +52,6 @@
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <time.h>
-#include "rtRoutingTree.h"
-#include "rtm_discovery_api.h"
-#include "local_benchmarking.h"
 #include <cjson/cJSON.h>
 
 #ifdef ENABLE_RDKLOGGER
@@ -231,7 +232,7 @@ rtRouted_ReadTextFile(char const* fname, char** content)
     fseek(pf, 0L, SEEK_END);
     sz = (size_t)ftell(pf);
     rewind(pf);
-    *content = malloc(sz+1);
+    *content = rt_malloc(sz+1);
     if(fread(*content, 1, sz, pf) != sz)
     {
       free(*content);
@@ -326,7 +327,7 @@ rtRouted_ParseConfig(char const* fname)
         }
         else
         {
-          g_spake2_L = malloc(strlen(item->valuestring)+1);
+          g_spake2_L = rt_malloc(strlen(item->valuestring)+1);
           strcpy(g_spake2_L, item->valuestring);
         }
       }
@@ -342,7 +343,7 @@ rtRouted_ParseConfig(char const* fname)
         }
         else
         {
-          g_spake2_w0 = malloc(strlen(item->valuestring)+1);
+          g_spake2_w0 = rt_malloc(strlen(item->valuestring)+1);
           strcpy(g_spake2_w0, item->valuestring);
         }
       }
@@ -385,7 +386,7 @@ rtRouted_ParseConfig(char const* fname)
 static rtError
 rtRouted_AddRoute(rtRouteMessageHandler handler, char const* exp, rtSubscription* subscription)
 {
-  rtRouteEntry* route = (rtRouteEntry *) malloc(sizeof(rtRouteEntry));
+  rtRouteEntry* route = (rtRouteEntry *) rt_malloc(sizeof(rtRouteEntry));
   route->subscription = subscription;
   route->message_handler = handler;
   strncpy(route->expression, exp, RTMSG_MAX_EXPRESSION_LEN);
@@ -774,7 +775,7 @@ rtRouted_OnMessageSubscribe(rtConnectedClient* sender, rtMessageHeader* hdr, uin
         }
         if(i == rtVector_Size(routes))
         {
-          rtSubscription* subscription = (rtSubscription *) malloc(sizeof(rtSubscription));
+          rtSubscription* subscription = (rtSubscription *) rt_malloc(sizeof(rtSubscription));
           subscription->id = route_id;
           subscription->client = sender;
           rc = rtRouted_AddRoute(rtRouted_ForwardMessage, expression, subscription);
@@ -844,7 +845,7 @@ rtRouted_OnMessageHello(rtConnectedClient* sender, rtMessageHeader* hdr, uint8_t
   }
   rtMessage_GetString(m, "inbox", &inbox);
 
-  rtSubscription* subscription = (rtSubscription *) malloc(sizeof(rtSubscription));
+  rtSubscription* subscription = (rtSubscription *) rt_malloc(sizeof(rtSubscription));
   subscription->id = 0;
   subscription->client = sender;
   rtRouted_AddRoute(rtRouted_ForwardMessage, inbox, subscription);
@@ -1265,7 +1266,7 @@ rtRouted_OnMessageKeyExchange(rtConnectedClient* sender, rtMessageHeader* hdr, u
       {
         if(!sender->encryption_buffer)
         {
-          sender->encryption_buffer = (uint8_t *) malloc(RTMSG_CLIENT_READ_BUFFER_SIZE);
+          sender->encryption_buffer = (uint8_t *) rt_malloc(RTMSG_CLIENT_READ_BUFFER_SIZE);
           memset(sender->encryption_buffer, 0, RTMSG_CLIENT_READ_BUFFER_SIZE);
           rtLog_Debug("key exchange complete");
         }
@@ -1329,8 +1330,8 @@ rtConnectedClient_Init(rtConnectedClient* clnt, int fd, struct sockaddr_storage*
   clnt->state = rtConnectionState_ReadHeaderPreamble;
   clnt->bytes_read = 0;
   clnt->bytes_to_read = RTMESSAGEHEADER_PREAMBLE_LENGTH;
-  clnt->read_buffer = (uint8_t *) malloc(RTMSG_CLIENT_READ_BUFFER_SIZE);
-  clnt->send_buffer = (uint8_t *) malloc(RTMSG_CLIENT_READ_BUFFER_SIZE);
+  clnt->read_buffer = (uint8_t *) rt_malloc(RTMSG_CLIENT_READ_BUFFER_SIZE);
+  clnt->send_buffer = (uint8_t *) rt_malloc(RTMSG_CLIENT_READ_BUFFER_SIZE);
   memcpy(&clnt->endpoint, remote_endpoint, sizeof(struct sockaddr_storage));
   memset(clnt->read_buffer, 0, RTMSG_CLIENT_READ_BUFFER_SIZE);
   memset(clnt->send_buffer, 0, RTMSG_CLIENT_READ_BUFFER_SIZE);
@@ -1496,7 +1497,7 @@ rtConnectedClient_Read(rtConnectedClient* clnt)
         int incoming_data_size = clnt->bytes_to_read + clnt->bytes_read;
         if(clnt->read_buffer_capacity < incoming_data_size)
         {
-          uint8_t * ptr = (uint8_t *)realloc(clnt->read_buffer, incoming_data_size);
+          uint8_t * ptr = (uint8_t *)rt_try_realloc(clnt->read_buffer, incoming_data_size);
           if(NULL != ptr)
           {
             clnt->read_buffer = ptr;
@@ -1534,7 +1535,7 @@ rtConnectedClient_Read(rtConnectedClient* clnt)
         if(RTMSG_CLIENT_READ_BUFFER_SIZE != clnt->read_buffer_capacity)
         {
           free(clnt->read_buffer);
-          clnt->read_buffer = (uint8_t *)malloc(RTMSG_CLIENT_READ_BUFFER_SIZE);
+          clnt->read_buffer = (uint8_t *)rt_malloc(RTMSG_CLIENT_READ_BUFFER_SIZE);
           if(NULL == clnt->read_buffer)
             rtLog_Fatal("Out of memory to create read buffer.");
           clnt->read_buffer_capacity = RTMSG_CLIENT_READ_BUFFER_SIZE;
@@ -1567,7 +1568,7 @@ rtRouted_RegisterNewClient(int fd, struct sockaddr_storage* remote_endpoint)
 
   remote_address[0] = '\0';
   remote_port = 0;
-  new_client = (rtConnectedClient *) malloc(sizeof(rtConnectedClient));
+  new_client = (rtConnectedClient *)rt_malloc(sizeof(rtConnectedClient));
   new_client->fd = -1;
   new_client->inbox[0] = '\0';
 
@@ -1624,7 +1625,7 @@ rtRouted_BindListener(char const* socket_name, int no_delay)
       }
   }
 
-  listener = (rtListener *) malloc(sizeof(rtListener));
+  listener = (rtListener *)rt_malloc(sizeof(rtListener));
   listener->fd = -1;
   memset(&listener->local_endpoint, 0, sizeof(struct sockaddr_storage));
 
@@ -1769,7 +1770,7 @@ int main(int argc, char* argv[])
 
   // add internal route
   {
-    route = (rtRouteEntry *) malloc(sizeof(rtRouteEntry));
+    route = (rtRouteEntry *)rt_malloc(sizeof(rtRouteEntry));
     route->subscription = NULL;
     strncpy(route->expression, "_RTROUTED.>", RTMSG_MAX_EXPRESSION_LEN-1);
     route->message_handler = rtRouted_OnMessage;
@@ -1826,7 +1827,7 @@ int main(int argc, char* argv[])
         break;
       case 'r':
       {
-        route = (rtRouteEntry *) malloc(sizeof(rtRouteEntry));
+        route = (rtRouteEntry *)rt_malloc(sizeof(rtRouteEntry));
         route->subscription = NULL;
         route->message_handler = &rtRouted_TrafficMonitorLog;
         strncpy(route->expression, ">", RTMSG_MAX_EXPRESSION_LEN-1);

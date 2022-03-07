@@ -24,6 +24,7 @@
 // rtError.cpp
 
 #include "rtError.h"
+#include "rtMemory.h"
 #include <assert.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -60,7 +61,9 @@ rtErrorThreadSpecific* getThreadSpecific()
   rtErrorThreadSpecific* specific = (rtErrorThreadSpecific *)(pthread_getspecific(key));
   if (specific == NULL)
   {
-    specific = (rtErrorThreadSpecific *) malloc(sizeof(rtErrorThreadSpecific));
+    specific = (rtErrorThreadSpecific *) rt_try_malloc(sizeof(rtErrorThreadSpecific));
+    if(!specific)
+      return NULL;
     specific->last_error = 0;
     specific->error_message[0] = '\0';
     pthread_setspecific(key, specific);
@@ -116,7 +119,7 @@ const char* rtStrError_SystemError(int e)
   // TODO: The below #ifdef is not the best approach. @see man strerror_r and
   // /usr/include/string.h for proper check of which version of strerror_r is 
   // available. Need to check for osx portability also
-  if (specific->error_message)
+  if (specific && specific->error_message)
   {
     #ifdef __linux__
     int n = strerror_r(e, specific->error_message, 256);

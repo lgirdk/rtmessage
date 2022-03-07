@@ -21,6 +21,7 @@
 #include "rtThreadPool.h"
 #include "rtList.h"
 #include "rtLog.h"
+#include "rtMemory.h"
 #include <pthread.h>
 #include <stdlib.h>
 #include <time.h>
@@ -103,7 +104,7 @@ int rtThread_DequeTask(rtThread thread)
       //remove the item now and pass NULL so we reuse item later
       rtList_RemoveItem(thread->pool->taskList, item, NULL);
       rtList_GetSize(thread->pool->taskList, &size);
-      rtLog_Debug("%s exit with new task. %lu tasks remaining in queue", __FUNCTION__, size);
+      rtLog_Debug("%s exit with new task. %zu tasks remaining in queue", __FUNCTION__, size);
       return 1;
     }
   }
@@ -153,12 +154,14 @@ void* rtThread_WorkerThreadFunc(void* data)
   return NULL;
 }
 
-void rtThreadPool_CreateWorkerThread(rtThreadPool pool)
+rtError rtThreadPool_CreateWorkerThread(rtThreadPool pool)
 {
   rtThread thread;
   pthread_attr_t attr;
   rtLog_Debug("%s enter", __FUNCTION__);
-  thread = malloc(sizeof(struct _rtThread));
+  thread = rt_try_malloc(sizeof(struct _rtThread));
+  if(!thread)
+    return rtErrorFromErrno(ENOMEM);
   thread->pool = pool;
   pthread_attr_init(&attr);
   if(pool->stackSize > 0)
@@ -167,12 +170,15 @@ void rtThreadPool_CreateWorkerThread(rtThreadPool pool)
   pthread_attr_destroy(&attr);
   rtList_PushBack(pool->threadList, thread, NULL);
   rtLog_Debug("%s exit", __FUNCTION__);
+  return RT_OK;
 }
 
 rtError rtThreadPool_Create(rtThreadPool* ppool, size_t maxThreadCount, size_t stackSize, int expireTime)
 {
   rtLog_Debug("%s enter", __FUNCTION__);
-  rtThreadPool pool = malloc(sizeof(struct _rtThreadPool));
+  rtThreadPool pool = rt_try_malloc(sizeof(struct _rtThreadPool));
+  if(!pool)
+    return rtErrorFromErrno(ENOMEM);
   rtList_Create(&pool->threadList);
   rtList_Create(&pool->taskList);
   pool->maxThreadCount = maxThreadCount;
@@ -262,7 +268,7 @@ rtError rtThreadPool_StopAllThread(rtThreadPool pool, int waitTimeMS)
   if(pool->busyThreadCount == 0 && cancelledTaskCount != 0)
     rtLog_Warn("Assertion failed: task list not empty");
 
-  rtLog_Debug("%s exit with %lu cancelled tasks and %lu tasks still finishing", 
+  rtLog_Debug("%s exit with %zu cancelled tasks and %zu tasks still finishing", 
     __FUNCTION__, cancelledTaskCount, pool->busyThreadCount);
   pthread_mutex_unlock(&pool->poolLock);
   if(cancelledTaskCount)
@@ -296,7 +302,9 @@ rtError rtThreadPool_RunTask(rtThreadPool pool, rtThreadPoolFunc func, void* use
   rtListItem_GetData(item, (void**)&task);
   if(!task)//first time data being used
   {
-    task = malloc(sizeof(struct _rtThreadTask));
+    task = rt_try_malloc(sizeof(struct _rtThreadTask));
+    if(!task)
+      return rtErrorFromErrno(ENOMEM);
     rtLog_Debug("taskList data null so alloc new %p", (void*)task);
     rtListItem_SetData(item, task);
   }
@@ -312,13 +320,14 @@ rtError rtThreadPool_RunTask(rtThreadPool pool, rtThreadPoolFunc func, void* use
   else if(pool->threadCount < pool->maxThreadCount)
   {
     rtLog_Debug("%s creating new thread", __FUNCTION__);
-    rtThreadPool_CreateWorkerThread(pool);
+    if((err = rtThreadPool_CreateWorkerThread(pool)) != RT_OK)
+      return err;
     if(pool->threadCount == pool->maxThreadCount - 1)
-      rtLog_Debug("%s reached max thread count %lu", __FUNCTION__, pool->maxThreadCount);
+      rtLog_Debug("%s reached max thread count %zu", __FUNCTION__, pool->maxThreadCount);
   }
   else
   {
-    rtLog_Debug("%s at max thread count %lu", __FUNCTION__, pool->maxThreadCount);
+    rtLog_Debug("%s at max thread count %zu", __FUNCTION__, pool->maxThreadCount);
     err = RT_ERROR_THREADPOOL_TASK_PENDING;
   }
   pthread_mutex_unlock(&pool->poolLock);
