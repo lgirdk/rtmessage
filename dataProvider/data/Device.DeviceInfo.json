@@ -16,6 +16,7 @@
       {"name": "X_RDKCENTRAL-COM_UpstreamBandwidth", "type": "string", "optional": false, "writable": false, "version": "2.0"},
       {"name": "X_RDKCENTRAL-COM_LastRebootReason", "type": "string", "optional": false, "writable": true, "version": "2.0"},
       {"name": "X_RDKCENTRAL-COM_IMAGENAME", "type": "string", "optional": false, "writable": false, "version": "2.0"},
-      {"name": "X_RDK_FirmwareName", "type": "string", "optional": false, "writable": false, "version": "2.0"}
+      {"name": "X_RDK_FirmwareName", "type": "string", "optional": false, "writable": false, "version": "2.0"},
+      {"name": "X_RDKCENTRAL-COM_RDKVersion", "type": "string", "optional": false, "writable": false, "version": "2.0"}
     ]
 }
