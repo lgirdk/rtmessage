@@ -587,6 +587,11 @@ rtConnection_CreateInternal(rtConnection* con, char const* application_name, cha
   if (err != RT_OK)
   {
     rtLog_Warn("failed to parse:%s. %s", router_config, rtStrError(err));
+    free(c->send_buffer);
+    free(c->recv_buffer);
+    free(c->application_name);
+    rtList_Destroy(c->pending_requests_list,NULL);
+    rtList_Destroy(c->callback_message_list, NULL);
     free(c);
     return err;
   }
@@ -595,6 +600,12 @@ rtConnection_CreateInternal(rtConnection* con, char const* application_name, cha
   {
     // TODO: at least log this
     rtLog_Warn("rtConnection_ConnectAndRegister(1):%d", err);
+    free(c->send_buffer);
+    free(c->recv_buffer);
+    free(c->application_name);
+    rtList_Destroy(c->pending_requests_list,NULL);
+    rtList_Destroy(c->callback_message_list, NULL);
+    free(c);
   }
 
   if (err == RT_OK)
