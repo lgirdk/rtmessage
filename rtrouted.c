@@ -540,6 +540,9 @@ rtRouted_SendMessage(rtMessageHeader * request_hdr, rtMessage message, rtConnect
               else
               {
                 rtLog_Warn("error forwarding message to client. %d %s", errno, strerror(errno));
+                rtRouted_PrintClientInfo(client);
+                if(skipClient)
+                    rtRouted_PrintClientInfo(skipClient);
                 ret = RT_FAIL;
               }
               break;
@@ -718,6 +721,7 @@ rtRouted_ForwardMessage(rtConnectedClient* sender, rtMessageHeader* hdr, uint8_t
     else
     {
       rtLog_Warn("error forwarding message to client. %d %s", errno, strerror(errno));
+      rtRouted_PrintClientInfo(subscription->client);
     }
     return RT_FAIL;
   }

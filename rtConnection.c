@@ -78,6 +78,8 @@ typedef volatile int atomic_uint_least32_t;
 #define DEFAULT_MAX_RETRIES 3
 #endif
 
+extern char* __progname;
+
 struct _rtListener
 {
   int                     in_use;
@@ -582,7 +584,7 @@ rtConnection_CreateInternal(rtConnection* con, char const* application_name, cha
   memset(&c->remote_endpoint, 0, sizeof(struct sockaddr_storage));
   memset(c->send_buffer, 0, RTMSG_SEND_BUFFER_SIZE);
   memset(c->recv_buffer, 0, RTMSG_SEND_BUFFER_SIZE);
-  snprintf(c->inbox_name, RTMSG_HEADER_MAX_TOPIC_LENGTH, "%s.INBOX.%d", c->application_name, (int) getpid());
+  snprintf(c->inbox_name, RTMSG_HEADER_MAX_TOPIC_LENGTH, "%s.%s.INBOX.%d", c->application_name, __progname, (int) getpid());
   err = rtSocketStorage_FromString(&c->remote_endpoint, router_config);
   if (err != RT_OK)
   {
