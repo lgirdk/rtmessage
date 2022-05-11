@@ -244,6 +244,22 @@ rtConnection_GetNextSubscriptionId()
   return next_id++;
 }
 
+static int GetRunThreadsSync(rtConnection con)
+{
+  int run_threads;
+  pthread_mutex_lock(&con->mutex);
+  run_threads = con->run_threads;
+  pthread_mutex_unlock(&con->mutex);
+  return run_threads;
+}
+
+static void SetRunThreadsSync(rtConnection con, int run_threads)
+{
+  pthread_mutex_lock(&con->mutex);
+  con->run_threads = run_threads;
+  pthread_mutex_unlock(&con->mutex);
+}
+
 static int
 rtConnection_ShouldReregister(rtError e)
 {
@@ -709,9 +725,7 @@ rtConnection_Destroy(rtConnection con)
   if (con)
   {
     unsigned int i;
-    pthread_mutex_lock(&con->mutex);
-    con->run_threads = 0;
-    pthread_mutex_unlock(&con->mutex);
+    SetRunThreadsSync(con, 0);
     
     if (con->fd != -1)
       shutdown(con->fd, SHUT_RDWR);
@@ -1465,14 +1479,11 @@ rtConnection_Read(rtConnection con, int32_t timeout)
     else
     {
       /* Read failed. If this is due to a connection termination initiated by us, break and return. Retry if anything else.*/
-      pthread_mutex_lock(&con->mutex);
-      if(0 == con->run_threads)
+      int run_thread = GetRunThreadsSync(con);
+      if (0 == run_thread)
       {
-        pthread_mutex_unlock(&con->mutex); //This is a controlled exit. Break the loop.
         break;
       }
-      else
-        pthread_mutex_unlock(&con->mutex);
     }
 
     if (err == RT_OK)
@@ -1662,16 +1673,24 @@ static void * rtConnection_CallbackThread(void *data)
 {
   rtConnection con = (rtConnection)data;
   rtLog_Debug("Callback thread started");
-  while(1 == con->run_threads)
+
+  while (1 == GetRunThreadsSync(con))
   {
     size_t size;
     rtListItem listItem;
 
     pthread_mutex_lock(&con->callback_message_mutex);
 
+    /*Must check run_threads after lock in order to stay synced with rtConnection_StopThreads*/
+    if (0 == GetRunThreadsSync(con))
+    {
+      pthread_mutex_unlock(&con->callback_message_mutex);
+      break;
+    }
+
     rtList_GetSize(con->callback_message_list, &size);
 
-    if(size == 0)
+    if (size == 0)
     {
       //rtLog_Error("Callback thread before wait");
       pthread_cond_wait(&con->callback_message_cond, &con->callback_message_mutex);
@@ -1683,9 +1702,10 @@ static void * rtConnection_CallbackThread(void *data)
 
     pthread_mutex_unlock(&con->callback_message_mutex);
 
-    if(0 == con->run_threads)
-        break;
-
+    if (0 == GetRunThreadsSync(con))
+    {
+      break;
+    }
     /*Execute listener callbacks for all messages in callback_message_list.
       Remove messages from list as you go and return once the list is empty.
       Very important to not keep any mutex lock while executing the callback*/
@@ -1756,7 +1776,7 @@ static void * rtConnection_ReaderThread(void *data)
   rtConnection con = (rtConnection)data;
   con->read_tid = syscall(__NR_gettid);
   rtLog_Debug("Reader thread started");
-  while(1 == con->run_threads)
+  while (1 == GetRunThreadsSync(con))
   {
     rtTime_Now(&con->reader_reconnect_time);
     #ifdef WITH_SPAKE2
@@ -1765,14 +1785,10 @@ static void * rtConnection_ReaderThread(void *data)
     if((err = rtConnection_Read(con, -1)) != RT_OK)
     #endif
     {
-      pthread_mutex_lock(&con->mutex);
-      if(0 == con->run_threads)
+      if (0 == GetRunThreadsSync(con))
       {
-        pthread_mutex_unlock(&con->mutex); //This is a controlled exit. Break the loop.
         break;
       }
-      else
-        pthread_mutex_unlock(&con->mutex);
       #ifdef WITH_SPAKE2
       rtLog_Debug("Reader failed with error 0x%x.", err);
       #else
@@ -1788,10 +1804,10 @@ static void * rtConnection_ReaderThread(void *data)
          On rdkb if rtrouted crashes rbus is hosed irregardless of reconnect.
          need to check rdkv
         */
-        while(1 == con->run_threads)
+        while (1 == GetRunThreadsSync(con))
         {
             err = rtConnection_ConnectAndRegister(con, &con->reader_reconnect_time);
-            if(err == RT_OK || con->run_threads != 1)
+            if (err == RT_OK || 1 != GetRunThreadsSync(con))
                 break;
             sleep(5);
             rtTime_Now(&con->reader_reconnect_time);//set this time to take ownership of reconnect
@@ -1842,7 +1858,7 @@ static int rtConnection_StopThreads(rtConnection con)
 {
   rtLog_Info("Stopping threads");
 
-  con->run_threads = 0;
+  SetRunThreadsSync(con, 0);
 
   pthread_mutex_lock(&con->callback_message_mutex);
   pthread_cond_signal(&con->callback_message_cond);
