@@ -4,6 +4,7 @@
   "properties" :
     [
       {"name": "SSID", "type": "string", "optional": false, "writable": false, "version": "2.0"},
+      {"name": "ActiveSSID", "type": "string", "optional": false, "writable": false, "version": "2.0"},
       {"name": "EndPointNumberOfEntries", "type": "string", "optional": false, "writable": false, "version": "2.0"},
       {"name": "EndPointIdsOfEntries", "type": "string", "optional": false, "writable": false, "version": "2.0"},
       {"name": "X_RDKCENTRAL-COM_IPv4Address", "type": "string", "optional": false, "writable": false, "version": "2.0"},
