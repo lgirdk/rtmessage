@@ -26,6 +26,7 @@
 #include "rtMessageHeader.h"
 
 #define RTMSG_DEFAULT_ROUTER_LOCATION "tcp://127.0.0.1:10001"
+#define RTROUTED_TRANSACTION_TIME_INFO "TransactionTime"
 
 #ifdef __cplusplus
 extern "C" {

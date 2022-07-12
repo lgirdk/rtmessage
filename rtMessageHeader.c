@@ -37,6 +37,13 @@ rtMessageHeader_Init(rtMessageHeader* hdr)
   memset(hdr->topic, 0, RTMSG_HEADER_MAX_TOPIC_LENGTH);
   hdr->reply_topic_length = 0;
   memset(hdr->reply_topic, 0, RTMSG_HEADER_MAX_TOPIC_LENGTH);
+#ifdef MSG_ROUNDTRIP_TIME
+  hdr->T1 = 0;
+  hdr->T2 = 0;
+  hdr->T3 = 0;
+  hdr->T4 = 0;
+  hdr->T5 = 0;
+#endif
   return RT_OK;
 }
 
@@ -44,7 +51,14 @@ rtError
 rtMessageHeader_Encode(rtMessageHeader* hdr, uint8_t* buff)
 {
   uint8_t* ptr = buff;
-  static uint16_t const kSizeWithoutStringsInBytes = 32;
+#ifdef MSG_ROUNDTRIP_TIME
+  static uint16_t const kSizeWithoutStringsInBytes = 52; /* 28 bytes for basic data +
+                                                             4 bytes for Marker +
+                                                            20 bytes for timestamp */
+#else
+  static uint16_t const kSizeWithoutStringsInBytes = 32; /* 28 bytes for basic data +
+                                                             4 bytes for Marker */
+#endif
   uint16_t length = kSizeWithoutStringsInBytes
     + strlen(hdr->topic)
     + strlen(hdr->reply_topic);
@@ -58,6 +72,13 @@ rtMessageHeader_Encode(rtMessageHeader* hdr, uint8_t* buff)
   rtEncoder_EncodeInt32(&ptr, hdr->payload_length);
   rtEncoder_EncodeString(&ptr, hdr->topic, NULL);
   rtEncoder_EncodeString(&ptr, hdr->reply_topic, NULL);
+#ifdef MSG_ROUNDTRIP_TIME
+  rtEncoder_EncodeInt32(&ptr, hdr->T1);
+  rtEncoder_EncodeInt32(&ptr, hdr->T2);
+  rtEncoder_EncodeInt32(&ptr, hdr->T3);
+  rtEncoder_EncodeInt32(&ptr, hdr->T4);
+  rtEncoder_EncodeInt32(&ptr, hdr->T5);
+#endif
   rtEncoder_EncodeUInt16(&ptr, RTMSG_HEADER_MARKER);
   return RT_OK;
 }
@@ -98,6 +119,13 @@ rtMessageHeader_Decode(rtMessageHeader* hdr, uint8_t const* buff)
     return RT_ERROR;
   }
   rtEncoder_DecodeStr(&ptr, hdr->reply_topic, hdr->reply_topic_length);
+#ifdef MSG_ROUNDTRIP_TIME
+  rtEncoder_DecodeUInt32(&ptr, (uint32_t*)&hdr->T1);
+  rtEncoder_DecodeUInt32(&ptr, (uint32_t*)&hdr->T2);
+  rtEncoder_DecodeUInt32(&ptr, (uint32_t*)&hdr->T3);
+  rtEncoder_DecodeUInt32(&ptr, (uint32_t*)&hdr->T4);
+  rtEncoder_DecodeUInt32(&ptr, (uint32_t*)&hdr->T5);
+#endif
 
   rtEncoder_DecodeUInt16(&ptr, &marker);
   if(RTMSG_HEADER_MARKER != marker)

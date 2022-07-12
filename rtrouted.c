@@ -147,6 +147,46 @@ rtRouted_BindListener(char const* socket_name, int no_delay);
 static void
 rtRouted_SendAdvisoryMessage(rtConnectedClient* clnt, rtAdviseEvent event);
 
+#if MSG_ROUNDTRIP_TIME
+static void
+rtRouted_TransactionTimingDetails(rtMessageHeader header_details)
+{
+  char time_buff[64] = {0};
+  rtTime_t timestamp = {0};
+  time_t boottime = 0;
+  rtTime_t uptime = {0};
+
+  rtTime_Now(&uptime);
+  boottime = time(NULL) - uptime.tv_sec; /* To calculate actual boot time of the device
+                                            time(NULL) - Time since Epoch time(1st Jan 1970)
+                                            uptime.tv_sec - Time since boot of device */
+  printf("=======================================================================\n");
+  timestamp.tv_sec = header_details.T1 + boottime;
+  rtTime_ToString(&timestamp, time_buff);
+  printf("Consumer : %s\n", header_details.topic);
+  printf("Provider : %s\n", header_details.reply_topic);
+  printf("Time at which consumer sends the request to daemon     : %s\n", time_buff);
+  memset(time_buff, 0, sizeof(time_buff));
+  timestamp.tv_sec = header_details.T2 + boottime;
+  rtTime_ToString(&timestamp, time_buff);
+  printf("Time at which daemon receives the message from consumer: %s\n", time_buff);
+  memset(time_buff, 0, sizeof(time_buff));
+  timestamp.tv_sec = header_details.T3 + boottime;
+  rtTime_ToString(&timestamp, time_buff);
+  printf("Time at which daemon writes to provider socket         : %s\n", time_buff);
+  memset(time_buff, 0, sizeof(time_buff));
+  timestamp.tv_sec = header_details.T4 + boottime;
+  rtTime_ToString(&timestamp, time_buff);
+  printf("Time at which provider sends back the response         : %s\n", time_buff);
+  memset(time_buff, 0, sizeof(time_buff));
+  timestamp.tv_sec = header_details.T5 + boottime;
+  rtTime_ToString(&timestamp, time_buff);
+  printf("Time at which daemon received the response             : %s\n", time_buff);
+  printf("Total duration                                         : %ld seconds\n", (header_details.T5 - header_details.T1));
+  printf("=======================================================================\n");
+}
+#endif
+
 static void
 rtRouted_PrintHelp()
 {
@@ -650,6 +690,13 @@ rtRouted_ForwardMessage(rtConnectedClient* sender, rtMessageHeader* hdr, uint8_t
   new_header.flags = hdr->flags;
   strncpy(new_header.topic, hdr->topic, RTMSG_HEADER_MAX_TOPIC_LENGTH-1);
   strncpy(new_header.reply_topic, hdr->reply_topic, RTMSG_HEADER_MAX_TOPIC_LENGTH-1);
+#ifdef MSG_ROUNDTRIP_TIME
+  new_header.T1 = hdr->T1;
+  new_header.T2 = hdr->T2;
+  new_header.T3 = hdr->T3;
+  new_header.T4 = hdr->T4;
+  new_header.T5 = hdr->T5;
+#endif
 
 #ifdef WITH_SPAKE2
   if(hdr->flags & rtMessageFlags_Encrypted)
@@ -740,6 +787,13 @@ static void prep_reply_header_from_request(rtMessageHeader *reply, const rtMessa
   strncpy(reply->reply_topic, request->topic, RTMSG_HEADER_MAX_TOPIC_LENGTH-1);
   reply->topic_length = request->reply_topic_length;
   reply->reply_topic_length = request->topic_length;
+#ifdef MSG_ROUNDTRIP_TIME
+  reply->T1 = request->T1;
+  reply->T2 = request->T2;
+  reply->T3 = request->T3;
+  reply->T4 = request->T4;
+  reply->T5 = request->T5;
+#endif
 }
 
 static void
@@ -858,6 +912,39 @@ rtRouted_OnMessageHello(rtConnectedClient* sender, rtMessageHeader* hdr, uint8_t
   
   (void)hdr;
 }
+
+#ifdef MSG_ROUNDTRIP_TIME
+static void
+rtRouted_OnMessageTimeOut(rtConnectedClient* sender, rtMessageHeader* hdr, uint8_t const* buff, int n)
+{
+  rtMessage m;
+  char const* topic = NULL;
+  char const* reply_topic = NULL;
+  rtMessageHeader header;
+
+  if(RT_OK != rtMessage_FromBytes(&m, buff, n))
+  {
+    rtLog_Warn("Bad message");
+    rtLog_Warn("Sender %s", sender->ident);
+    return;
+  }
+  rtMessageHeader_Init(&header);
+  rtMessage_GetInt32(m, "T1", (int32_t *)&header.T1);
+  rtMessage_GetInt32(m, "T2", (int32_t *)&header.T2);
+  rtMessage_GetInt32(m, "T3", (int32_t *)&header.T3);
+  rtMessage_GetInt32(m, "T4", (int32_t *)&header.T4);
+  rtMessage_GetInt32(m, "T5", (int32_t *)&header.T5);
+  rtMessage_GetString(m, "topic", &topic);
+  rtMessage_GetString(m, "reply_topic", &reply_topic);
+  snprintf(header.topic, sizeof(header.topic), "%s", topic);
+  snprintf(header.reply_topic, sizeof(header.reply_topic), "%s", reply_topic);
+  printf("Consumer exist but the request timed out\n");
+  rtRouted_TransactionTimingDetails(header);
+
+  rtMessage_Release(m);
+  (void)hdr;
+}
+#endif
 
 static void
 rtRouted_OnMessageDiscoverRegisteredComponents(rtConnectedClient* sender, rtMessageHeader* hdr, uint8_t const* buff, int n)
@@ -1319,7 +1406,13 @@ rtRouted_OnMessage(rtConnectedClient* sender, rtMessageHeader* hdr, uint8_t cons
   {
     rtRouted_OnMessageKeyExchange(sender, hdr, buff, n);
   }
-#endif  
+#endif 
+#ifdef MSG_ROUNDTRIP_TIME 
+  else if (strcmp(hdr->topic, RTROUTED_TRANSACTION_TIME_INFO) == 0)
+  {
+    rtRouted_OnMessageTimeOut(sender, hdr, buff, n);
+  }
+#endif
   else
   {
     rtLog_Info("no handler for message:%s", hdr->topic);
@@ -1357,6 +1450,9 @@ rtRouter_DispatchMessageFromClient(rtConnectedClient* clnt)
   rtRouteEntry * route;
   rtList list;
   rtListItem item;
+#ifdef MSG_ROUNDTRIP_TIME
+  static rtTime_t ts = {0};
+#endif
   START_TRACKING();
 dispatch:
 
@@ -1377,6 +1473,13 @@ dispatch:
           rtError err = RT_OK;
           match_found = 1;
           STOP_TRACKING_v2();
+#ifdef MSG_ROUNDTRIP_TIME
+          if((clnt->header.flags & rtMessageFlags_Request))
+          {
+            rtTime_Now(&ts);
+            clnt->header.T3 = ts.tv_sec;
+          }
+#endif
           rtLog_Debug("DispatchMessage topic=%s expression=%s", clnt->header.topic, route->expression);
           err = route->message_handler(clnt, &clnt->header, clnt->read_buffer +
               clnt->header.header_length, clnt->header.payload_length, route->subscription);
@@ -1404,6 +1507,10 @@ dispatch:
       goto dispatch;
       //rtConnection_SendErrorMessageToCaller(clnt->fd, &clnt->header);
     }
+#ifdef MSG_ROUNDTRIP_TIME
+    printf("Consumer does not exist\n");
+    rtRouted_TransactionTimingDetails(clnt->header);
+#endif
   }
 }
 
@@ -1440,6 +1547,21 @@ rtConnectedClient_Read(rtConnectedClient* clnt)
 {
   ssize_t bytes_read;
   int bytes_to_read = (clnt->bytes_to_read - clnt->bytes_read);
+
+#ifdef MSG_ROUNDTRIP_TIME
+  rtTime_t daemon_request = {0};
+  rtTime_t daemon_response = {0};
+  if(clnt->header.flags & rtMessageFlags_Request)
+  {
+     rtTime_Now(&daemon_request);
+     clnt->header.T2 = daemon_request.tv_sec;
+  }
+  if(clnt->header.flags & rtMessageFlags_Response)
+  {
+     rtTime_Now(&daemon_response);
+     clnt->header.T5 = daemon_response.tv_sec;
+  }
+#endif
 
   bytes_read = recv(clnt->fd, &clnt->read_buffer[clnt->bytes_read], bytes_to_read, MSG_NOSIGNAL);
   if (bytes_read == -1)
@@ -1787,6 +1909,9 @@ int main(int argc, char* argv[])
     rtRoutingTree_AddTopicRoute(routingTree, RTROUTER_DIAG_DESTINATION, (void *)route, 0);
 #ifdef WITH_SPAKE2
     rtRoutingTree_AddTopicRoute(routingTree, RTROUTED_KEY_EXCHANGE, (void *)route, 0);
+#endif
+#ifdef MSG_ROUNDTRIP_TIME
+    rtRoutingTree_AddTopicRoute(routingTree, RTROUTED_TRANSACTION_TIME_INFO, (void *)route, 0);
 #endif
   }
 

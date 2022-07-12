@@ -83,6 +83,7 @@ option(ENABLE_RDKLOGGER "ENABLE_RDKLOGGER" OFF)
 option(INCLUDE_BREAKPAD "INCLUDE_BREAKPAD" OFF)
 option(RDKC_BUILD "RDKC_BUILD" ON)
 option(WITH_SPAKE2 "WITH_SPAKE2" OFF)
+option(MSG_ROUNDTRIP_TIME "MSG_ROUNDTRIP_TIME" OFF)
 
 set(OPENSSL_REQUIRED FALSE)
 
@@ -102,6 +103,11 @@ if (WITH_SPAKE2)
   find_library(SPAKE2_LIBRARY spake2plus HINTS "${LIBEXCHANGER_PATH}/Release/src")
   find_library(PWD_LIBRARY pwd HINTS "${LIBEXCHANGER_PATH}/password/src")
 endif (WITH_SPAKE2)
+
+if (MSG_ROUNDTRIP_TIME)
+  message("Message rountrip time calculation enabled")
+  add_definitions(-DMSG_ROUNDTRIP_TIME=1)
+endif (MSG_ROUNDTRIP_TIME)
 
 if (OPENSSL_REQUIRED)
   message("openssl enabled")

@@ -225,7 +225,10 @@ static rtError rtConnection_SendInternal(
   char const* topic,
   char const* reply_topic, 
   int flags, 
-  uint32_t sequence_number);
+  uint32_t sequence_number,
+  uint32_t T1,
+  uint32_t T2,
+  uint32_t T3);
   
 rtError
 rtConnection_SendRequestInternal(
@@ -818,7 +821,7 @@ rtConnection_SendMessageDirect(rtConnection con, rtMessage msg, char const* topi
 #else
     sequence_number = __sync_fetch_and_add(&con->sequence_number, 1);
 #endif
-    err = rtConnection_SendInternal(con, p, n, topic, listener, 0, sequence_number);
+    err = rtConnection_SendInternal(con, p, n, topic, listener, 0, sequence_number, 0, 0, 0);
     pthread_mutex_unlock(&con->mutex);
     rtMessage_FreeByteArray(p);
 
@@ -874,7 +877,7 @@ rtConnection_SendResponse(rtConnection con, rtMessageHeader const* request_hdr, 
     rtMessage_ToByteArrayWithSize(res, &p, DEFAULT_SEND_BUFFER_SIZE, &n);
     pthread_mutex_lock(&con->mutex);
   //TODO: should we send response on reconnect ?
-    err = rtConnection_SendInternal(con, p, n, request_hdr->reply_topic, request_hdr->topic, rtMessageFlags_Response, request_hdr->sequence_number);
+    err = rtConnection_SendInternal(con, p, n, request_hdr->reply_topic, request_hdr->topic, rtMessageFlags_Response, request_hdr->sequence_number, 0, 0, 0);
     pthread_mutex_unlock(&con->mutex);
     rtMessage_FreeByteArray(p);
 
@@ -920,7 +923,7 @@ rtConnection_SendBinaryDirect(rtConnection con, uint8_t const* p, uint32_t n, ch
 #endif
 
     pthread_mutex_lock(&con->mutex);
-    err = rtConnection_SendInternal(con, p, n, topic, listener, rtMessageFlags_RawBinary, sequence_number);
+    err = rtConnection_SendInternal(con, p, n, topic, listener, rtMessageFlags_RawBinary, sequence_number, 0, 0, 0);
     pthread_mutex_unlock(&con->mutex);
 
     if(err == RT_NO_CONNECTION)
@@ -983,8 +986,14 @@ rtConnection_SendBinaryResponse(rtConnection con, rtMessageHeader const* request
     return rtErrorFromErrno(EINVAL);
 
   pthread_mutex_lock(&con->mutex);
+#ifdef MSG_ROUNDTRIP_TIME
   err = rtConnection_SendInternal(con, p, n, request_hdr->reply_topic, request_hdr->topic,
-    rtMessageFlags_Response|rtMessageFlags_RawBinary, request_hdr->sequence_number);
+    rtMessageFlags_Response|rtMessageFlags_RawBinary, request_hdr->sequence_number, request_hdr->T1, request_hdr->T2, request_hdr->T3);
+#else
+  err = rtConnection_SendInternal(con, p, n, request_hdr->reply_topic, request_hdr->topic,
+    rtMessageFlags_Response|rtMessageFlags_RawBinary, request_hdr->sequence_number, 0, 0, 0);
+#endif
+
   pthread_mutex_unlock(&con->mutex);
   return err;
 }
@@ -1021,7 +1030,7 @@ rtConnection_SendRequestInternal(rtConnection con, uint8_t const* pReq, uint32_t
     queue_entry.response = NULL;
 
     rtList_PushFront(con->pending_requests_list, (void*)&queue_entry, &listItem);
-    err = rtConnection_SendInternal(con, p, n, topic, con->inbox_name, rtMessageFlags_Request | flags, sequence_number);
+    err = rtConnection_SendInternal(con, p, n, topic, con->inbox_name, rtMessageFlags_Request | flags, sequence_number, 0, 0, 0);
     if (err != RT_OK)
     {
       ret = err;
@@ -1130,7 +1139,7 @@ dequeue_and_continue:
 
 rtError
 rtConnection_SendInternal(rtConnection con, uint8_t const* buff, uint32_t n, char const* topic,
-  char const* reply_topic, int flags, uint32_t sequence_number)
+  char const* reply_topic, int flags, uint32_t sequence_number, uint32_t T1, uint32_t T2, uint32_t T3)
 {
   rtError err;
   int num_attempts;
@@ -1142,6 +1151,11 @@ rtConnection_SendInternal(rtConnection con, uint8_t const* buff, uint32_t n, cha
 
   if (!con)
     return rtErrorFromErrno(EINVAL);
+
+#ifdef MSG_ROUNDTRIP_TIME
+  rtTime_t send_time;
+  rtTime_Now(&send_time);
+#endif
 
 #ifdef WITH_SPAKE2
   /*encrypte all non-internal messages*/
@@ -1185,6 +1199,23 @@ rtConnection_SendInternal(rtConnection con, uint8_t const* buff, uint32_t n, cha
   }
   header.sequence_number = sequence_number; 
   header.flags = flags;
+#ifdef MSG_ROUNDTRIP_TIME
+  if(header.flags & rtMessageFlags_Request)
+  {
+       header.T1 = send_time.tv_sec;
+  }
+  if(header.flags & rtMessageFlags_Response)
+  {
+       header.T1 = T1;
+       header.T2 = T2;
+       header.T3 = T3;
+       header.T4 = send_time.tv_sec;
+  }
+#else
+  (void)T1;
+  (void)T2;
+  (void)T3;
+#endif
 #ifdef ENABLE_ROUTER_BENCHMARKING
   if(1 == g_taint_packets)
     header.flags |= rtMessageFlags_Tainted;
@@ -1576,6 +1607,23 @@ rtConnection_Read(rtConnection con, int32_t timeout)
         }
       }
       pthread_mutex_unlock(&con->mutex);
+      /* The listItem is not present in the pending_requests_list, as it is been removed from the list because of request timeout */
+#ifdef MSG_ROUNDTRIP_TIME
+      if(listItem == NULL)
+      {
+        rtMessage m;
+        rtMessage_Create(&m);
+        rtMessage_SetInt32(m, "T1", msginfo->header.T1);
+        rtMessage_SetInt32(m, "T2", msginfo->header.T2);
+        rtMessage_SetInt32(m, "T3", msginfo->header.T3);
+        rtMessage_SetInt32(m, "T4", msginfo->header.T4);
+        rtMessage_SetInt32(m, "T5", msginfo->header.T5);
+        rtMessage_SetString(m, "topic", msginfo->header.topic);
+        rtMessage_SetString(m, "reply_topic", msginfo->header.reply_topic);
+        rtConnection_SendMessage(con, m, RTROUTED_TRANSACTION_TIME_INFO);
+        rtMessage_Release(m);
+      }
+#endif
     }
     else
     {
