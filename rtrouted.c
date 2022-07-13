@@ -182,7 +182,7 @@ rtRouted_TransactionTimingDetails(rtMessageHeader header_details)
   timestamp.tv_sec = header_details.T5 + boottime;
   rtTime_ToString(&timestamp, time_buff);
   printf("Time at which daemon received the response             : %s\n", time_buff);
-  printf("Total duration                                         : %ld seconds\n", (header_details.T5 - header_details.T1));
+  printf("Total duration                                         : %lld seconds\n", (long long int)(header_details.T5 - header_details.T1));
   printf("=======================================================================\n");
 }
 #endif
