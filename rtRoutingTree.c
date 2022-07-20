@@ -442,7 +442,15 @@ rtError rtRoutingTree_AddTopicRoute(rtRoutingTree rt, const char* topicPath, con
 
     rtLog_Debug("%s: %s", __FUNCTION__, topicPath);
 
-    tokenizeExpression(topicPath);
+    rtList list = NULL;
+
+    rtRoutingTree_GetTopicRoutes(rt, topicPath, &list);
+    if (list && err_on_dup && (0 != strcmp (topicPath, "_RTROUTED.ADVISORY")))
+    {
+        rtLog_Debug("Rejecting a duplicate registraion");
+        return RT_ERROR_DUPLICATE_ENTRY;
+    }
+
     if(workTokenCount == 0)
         return rc;
 
@@ -458,18 +466,11 @@ rtError rtRoutingTree_AddTopicRoute(rtRoutingTree rt, const char* topicPath, con
     int isCreated = 0;
     for(i = 0; i < workTokenCount; ++i)
     {
-        topic = getChildByName(rt, topic, workTokens[i].name, 1/*create missing topic*/, &isCreated, 0);
-    }
-
-    if (err_on_dup && (0 == isCreated) && (0 != strcmp (topicPath, "_RTROUTED.ADVISORY")))
-    {
-        /* Controlled Error log will be printed in rtrouted */
-        rtLog_Debug("Rejecting a duplicate registraion");
-        return RT_ERROR_DUPLICATE_ENTRY;
+       topic = getChildByName(rt, topic, workTokens[i].name, 1/*create missing topic*/, &isCreated, 0);
     }
 
     if(!topic->routeList)
-       rtList_Create(&topic->routeList);
+        rtList_Create(&topic->routeList);
 
     rtList_PushBack(topic->routeList, route, NULL);
 
