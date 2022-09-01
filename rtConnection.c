@@ -61,7 +61,7 @@ typedef volatile int atomic_uint_least32_t;
 #include <sys/time.h>
 
 #define RTMSG_LISTENERS_MAX 64
-#define RTMSG_SEND_BUFFER_SIZE (1024 * 8)
+#define RTMSG_SEND_BUFFER_SIZE (1024 * 64)
 #ifndef SOL_TCP
 #define SOL_TCP 6
 #endif
